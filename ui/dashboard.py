@@ -23,6 +23,7 @@ from ui.styles import DIMS
 # Logic Imports
 try:
     from logic.predictor import RiskPredictor
+    from logic.risk_engine import AdvancedRiskPredictor
     from logic.db_handler import DBHandler
     from logic.central_auth import CentralAuth
 except ImportError:
@@ -127,7 +128,7 @@ class Sidebar(ctk.CTkFrame):
             self, 
             text="AcaDesk", 
             font=FONTS["h1"], 
-            text_color=COLORS["text"]
+            text_color="#00E5FF"
         )
         logo.pack(pady=(40, 10))
         
@@ -141,6 +142,7 @@ class Sidebar(ctk.CTkFrame):
         
         # Sidebar Menu Buttons
         self.btn_dash = self.add_btn("📊  Dashboard", lambda: self.dash.show_view("Analytics"))
+        self.btn_hod = self.add_btn("👔  HOD Manager", lambda: self.dash.show_view("HOD"))
         self.btn_fac = self.add_btn("👥  Faculty Manager", lambda: self.dash.show_view("Faculty"))
         self.btn_sim = self.add_btn("🧠  AI Simulator", self.dash.open_ai_simulator)
         self.btn_pass = self.add_btn("🔒  Change Password", self.dash.open_change_pass) 
@@ -160,6 +162,7 @@ class Sidebar(ctk.CTkFrame):
             self, 
             text=txt, 
             fg_color="transparent", 
+            text_color=COLORS["accent"],
             anchor="w", 
             height=DIMS["btn_height"], 
             hover_color="#222", 
@@ -173,10 +176,17 @@ class Sidebar(ctk.CTkFrame):
         self.lbl_user.configure(text=f"User: {username}")
         
         user_type = self.controller.shared_data.get("user_type")
-        if user_type == "Admin": 
+        
+        self.btn_hod.pack_forget()
+        self.btn_fac.pack_forget()
+        self.btn_sim.pack_forget()
+        
+        if user_type == "Admin":
+            self.btn_hod.pack(fill="x", padx=10)
+            self.btn_fac.pack(fill="x", padx=10)
+            self.btn_sim.pack(fill="x", padx=10, pady=2)
+        elif user_type == "HOD":
             self.btn_fac.pack(fill="x", padx=10, pady=2)
-        else: 
-            self.btn_fac.pack_forget()
 
 # ====================================================
 #  FACULTY MANAGER
@@ -192,6 +202,7 @@ class FacultyManagerPanel(ctk.CTkFrame):
         title = ctk.CTkLabel(
             self, 
             text="FACULTY ACCESS CONTROL", 
+            text_color="#00E5FF",
             font=FONTS["h1"]
         )
         title.pack(anchor="w", padx=40, pady=(40, 20))
@@ -233,7 +244,17 @@ class FacultyManagerPanel(ctk.CTkFrame):
             self.db = DBHandler(erp_conf)
             b_map = self.db.get_branch_map()
             self.branch_map = {name: str(id) for id, name in b_map.items()}
-            self.br_combo.configure(values=list(self.branch_map.keys()))
+            
+            user_type = self.controller.shared_data.get("user_type")
+            if user_type == "HOD":
+                assigned_dept = self.controller.shared_data.get("assigned_department")
+                assigned_name = b_map.get(assigned_dept, assigned_dept)
+                self.br_combo.configure(values=[assigned_name])
+                self.br_combo.set(assigned_name)
+                self.br_combo.configure(state="disabled")
+            else:
+                self.br_combo.configure(values=list(self.branch_map.keys()))
+                self.br_combo.configure(state="normal")
             
         for widget in self.list_frame.winfo_children():
             widget.destroy()
@@ -241,6 +262,11 @@ class FacultyManagerPanel(ctk.CTkFrame):
         try:
             college = self.controller.shared_data.get("college_name")
             faculties = CentralAuth().get_faculty_list(college)
+            
+            user_type = self.controller.shared_data.get("user_type")
+            if user_type == "HOD":
+                assigned_dept = self.controller.shared_data.get("assigned_department")
+                faculties = [f for f in faculties if str(f['assigned_branch']).lower() == str(assigned_dept).lower()]
             
             for f in faculties:
                 branch_id = str(f['assigned_branch'])
@@ -254,7 +280,8 @@ class FacultyManagerPanel(ctk.CTkFrame):
                 lbl = ctk.CTkLabel(
                     row, 
                     text=f"👤  {f['username']}  [{branch_name}]", 
-                    font=FONTS["h3"]
+                    font=FONTS["h3"],
+                    text_color="#00E5FF"
                 )
                 lbl.pack(side="left", padx=15)
                 
@@ -287,16 +314,185 @@ class FacultyManagerPanel(ctk.CTkFrame):
         if CentralAuth().revoke_faculty(username, college):
             self.refresh()
 
+
+
+
+
+# ====================================================
+#  HOD MANAGER
+# ====================================================
+
+class HODManagerPanel(ctk.CTkFrame):
+    def __init__(self, parent, controller):
+        super().__init__(parent, corner_radius=0, fg_color=COLORS["bg"])
+        self.controller = controller
+        self.db = None
+        self.branch_map = {}
+        
+        title = ctk.CTkLabel(
+            self, 
+            text="HOD MANAGEMENT", 
+            text_color="#00E5FF",
+            font=FONTS["h1"]
+        )
+        title.pack(anchor="w", padx=40, pady=(40, 20))
+        
+        # Entry Form
+        form_card = ctk.CTkFrame(self, fg_color=COLORS["card"], corner_radius=10)
+        form_card.pack(fill="x", padx=40, pady=10)
+        
+        row_frame = ctk.CTkFrame(form_card, fg_color="transparent")
+        row_frame.pack(fill="x", padx=20, pady=20)
+        
+        self.u_entry = ctk.CTkEntry(row_frame, placeholder_text="Username", width=160)
+        self.u_entry.pack(side="left", padx=5)
+        
+        self.p_entry = ctk.CTkEntry(row_frame, placeholder_text="Password", width=160, show="*")
+        self.p_entry.pack(side="left", padx=5)
+        
+        self.br_combo = ctk.CTkComboBox(row_frame, width=160)
+        self.br_combo.set("Select Department")
+        self.br_combo.pack(side="left", padx=5)
+        
+        add_btn = ctk.CTkButton(
+            row_frame, 
+            text="+ ADD HOD", 
+            fg_color=COLORS["accent"], 
+            text_color="black", 
+            width=100, 
+            command=self.add_hod
+        )
+        add_btn.pack(side="left", padx=5)
+        
+        # HOD List Scroll Area
+        self.list_frame = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        self.list_frame.pack(fill="both", expand=True, padx=20)
+
+    def refresh(self):
+        erp_conf = self.controller.shared_data.get("erp_config")
+        if erp_conf:
+            self.db = DBHandler(erp_conf)
+            b_map = self.db.get_branch_map()
+            self.branch_map = {name: str(id) for id, name in b_map.items()}
+            self.br_combo.configure(values=list(self.branch_map.keys()))
+            
+        for widget in self.list_frame.winfo_children():
+            widget.destroy()
+            
+        try:
+            college = self.controller.shared_data.get("college_name")
+            from logic.central_auth import CentralAuth
+            hods = CentralAuth().get_hod_list(college)
+            
+            for h in hods:
+                dept_id = str(h.get('assigned_department'))
+                dept_name = "Unknown"
+                if self.db:
+                    dept_name = self.db.get_branch_map().get(dept_id, dept_id)
+                
+                row = ctk.CTkFrame(self.list_frame, fg_color=COLORS["card"], height=50)
+                row.pack(fill="x", pady=5)
+                
+                lbl = ctk.CTkLabel(
+                    row, 
+                    text=f"👔  {h['username']}   |   Department: {dept_name}", 
+                    font=FONTS["h3"],
+                    text_color="#00E5FF"
+                )
+                lbl.pack(side="left", padx=15)
+                
+                rev_btn = ctk.CTkButton(
+                    row, 
+                    text="REMOVE", 
+                    fg_color="#330000", 
+                    text_color=COLORS["danger"], 
+                    width=100, 
+                    command=lambda u=h['username']: self.revoke_hod(u)
+                )
+                rev_btn.pack(side="right", padx=15)
+        except Exception as e:
+            print(f"Error refreshing HODs: {e}")
+
+    def add_hod(self):
+        username = self.u_entry.get()
+        password = self.p_entry.get()
+        selection = self.br_combo.get()
+        
+        if username and password and selection != "Select Department":
+            dept_id = self.branch_map.get(selection)
+            admin_user = self.controller.shared_data["username"]
+            from logic.central_auth import CentralAuth
+            success, msg = CentralAuth().add_hod(admin_user, username, password, dept_id)
+            if success:
+                self.u_entry.delete(0, 'end')
+                self.p_entry.delete(0, 'end')
+                self.br_combo.set("Select Department")
+                self.refresh()
+            else:
+                ModernMessagebox("Error", msg, "error")
+
+    def revoke_hod(self, username):
+        college = self.controller.shared_data["college_name"]
+        from logic.central_auth import CentralAuth
+        if CentralAuth().revoke_hod(username, college):
+            self.refresh()
+
 # ====================================================
 #  ANALYTICS PANEL
+
+
+
 # ====================================================
+
+
+class SelectionCard(ctk.CTkFrame):
+    def __init__(self, parent, primary_text, secondary_text, command=None, *args, **kwargs):
+        # Base minimalist card: compact, subtle border
+        super().__init__(parent, fg_color="#181818", corner_radius=8, border_width=1, border_color="#2A2A2A", *args, **kwargs)
+        self.command = command
+        
+        # Content Container (Compact Padding)
+        self.content_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.content_frame.pack(fill="both", expand=True, padx=15, pady=12)
+        
+        # Modern, compact typography
+        self.lbl_primary = ctk.CTkLabel(self.content_frame, text=primary_text, font=("Arial", 14, "bold"), text_color=COLORS["accent"], anchor="w")
+        self.lbl_primary.pack(fill="x", pady=(0, 2))
+        
+        # Apply hover events
+        widgets = [self, self.content_frame, self.lbl_primary]
+        
+        if secondary_text:
+            self.lbl_secondary = ctk.CTkLabel(self.content_frame, text=secondary_text, font=("Arial", 11), text_color="#666666", anchor="w")
+            self.lbl_secondary.pack(fill="x")
+            widgets.append(self.lbl_secondary)
+            
+        for w in widgets:
+            w.bind("<Enter>", self.on_enter)
+            w.bind("<Leave>", self.on_leave)
+            w.bind("<Button-1>", self.on_click)
+            
+    def on_enter(self, event):
+        # Subtle modern hover state
+        self.configure(fg_color="#222222", border_color=COLORS["accent"])
+        self.lbl_primary.configure(text_color=COLORS["accent"])
+        
+    def on_leave(self, event):
+        # Revert to standard state
+        self.configure(fg_color="#181818", border_color="#2A2A2A")
+        self.lbl_primary.configure(text_color=COLORS["accent"])
+        
+    def on_click(self, event):
+        if self.command:
+            self.command()
 
 class AnalyticsPanel(ctk.CTkFrame):
     def __init__(self, parent, controller):
         super().__init__(parent, corner_radius=0, fg_color=COLORS["bg"])
         self.controller = controller
         self.db = None
-        self.ai = RiskPredictor()
+        self.ai = RiskPredictor()          # batch dashboard charts
+        self.adv_ai = None                  # advanced single-student engine (set in refresh)
         self.translator = None
         self.current_branch = None
         self.current_year = None
@@ -333,6 +529,10 @@ class AnalyticsPanel(ctk.CTkFrame):
         if erp_conf:
             self.db = DBHandler(erp_conf)
             self.translator = BranchTranslator(self.db)
+            try:
+                self.adv_ai = AdvancedRiskPredictor(self.db)
+            except Exception:
+                self.adv_ai = None
             
         if not self.db or not self.db.connected:
             self.show_error("Database connection missing. Access ERP setup.")
@@ -341,6 +541,16 @@ class AnalyticsPanel(ctk.CTkFrame):
         user_type = self.controller.shared_data.get("user_type")
         if user_type == "Faculty":
             assigned = self.controller.shared_data.get("assigned_branch")
+            if assigned:
+                self.current_branch = assigned
+                self.show_year_selection()
+                return
+        elif user_type == "HOD":
+            assigned = self.controller.shared_data.get("assigned_department")
+            if assigned:
+                self.current_branch = assigned
+                self.show_year_selection()
+                return
             if assigned:
                 self.current_branch = assigned
                 self.show_year_selection()
@@ -360,7 +570,7 @@ class AnalyticsPanel(ctk.CTkFrame):
 
     def show_branch_selection(self):
         self._clear()
-        self.lbl_title.configure(text="Select Department")
+        self.lbl_title.configure(text="Select Department",text_color="#00E5FF")
         self.btn_back.pack_forget()
         
         user_type = self.controller.shared_data.get("user_type")
@@ -376,15 +586,13 @@ class AnalyticsPanel(ctk.CTkFrame):
         
         for i, bid in enumerate(branch_ids):
             name = self.translator.get_name(bid)
-            btn = ctk.CTkButton(
+            card = SelectionCard(
                 scroll, 
-                text=name, 
-                font=("Arial", 16, "bold"), 
-                height=80, 
-                fg_color=COLORS["card"], 
+                primary_text=name, 
+                secondary_text="Department",
                 command=lambda b=bid: self.select_branch(b)
             )
-            btn.grid(row=i//3, column=i%3, padx=10, pady=10, sticky="nsew")
+            card.grid(row=i//3, column=i%3, padx=15, pady=15, sticky="nsew")
 
     def _render_admin_charts(self):
         all_students = self.db.get_all_students()
@@ -461,15 +669,13 @@ class AnalyticsPanel(ctk.CTkFrame):
         grid.grid_columnconfigure(1, weight=1)
         
         for i, yr in enumerate(YEARS):
-            btn = ctk.CTkButton(
+            card = SelectionCard(
                 grid, 
-                text=yr, 
-                font=("Arial", 18, "bold"), 
-                height=80, 
-                fg_color=COLORS["card"], 
+                primary_text=yr, 
+                secondary_text="",
                 command=lambda y=yr: self.select_year(y)
             )
-            btn.grid(row=i//2, column=i%2, padx=20, pady=15, sticky="nsew")
+            card.grid(row=i//2, column=i%2, padx=20, pady=20, sticky="nsew")
 
     def show_student_list(self):
         self._clear()
@@ -503,10 +709,10 @@ class AnalyticsPanel(ctk.CTkFrame):
         f_row = ctk.CTkFrame(self.content_area, fg_color="transparent")
         f_row.pack(fill="x", pady=(0, 10))
         
-        self.btn_all = self._create_filter_btn(f_row, "ALL", "All", "#333333")
-        self.btn_high = self._create_filter_btn(f_row, "HIGH", "High", COLORS["danger"])
-        self.btn_med = self._create_filter_btn(f_row, "MEDIUM", "Medium", COLORS["warning"])
-        self.btn_low = self._create_filter_btn(f_row, "LOW", "Low", COLORS["success"])
+        self.btn_all  = self._create_filter_btn(f_row, "ALL",    "All",    "#333333")
+        self.btn_high = self._create_filter_btn(f_row, "HIGH",   "High",   COLORS["danger"])
+        self.btn_med  = self._create_filter_btn(f_row, "MEDIUM",  "Medium", COLORS["warning"])
+        self.btn_low  = self._create_filter_btn(f_row, "LOW",    "Low",    COLORS["success"])
         
         self.current_filter = "All"
         self._update_filter_visuals()
@@ -535,7 +741,7 @@ class AnalyticsPanel(ctk.CTkFrame):
         self.btn_high.configure(fg_color="transparent")
         self.btn_med.configure(fg_color="transparent")
         self.btn_low.configure(fg_color="transparent")
-        
+
         if self.current_filter == "All":
             self.btn_all.configure(fg_color="#333333")
         elif self.current_filter == "High":
@@ -549,175 +755,514 @@ class AnalyticsPanel(ctk.CTkFrame):
         for widget in self.list_frame.winfo_children():
             widget.destroy()
             
+        # Use full-column fetch for the advanced engine; fallback to basic fetch
+        try:
+            students_full = self.db.get_students_full(self.current_branch, self.current_year)
+        except Exception:
+            students_full = []
+
+        # Build a lookup from display_reg_no → full row
+        full_lookup: dict = {}
+        for row in students_full:
+            key = str(row.get('display_reg_no', '') or row.get(
+                self.db.map.get('registration_no', ''), ''))
+            full_lookup[key] = row
+
         students = self.db.get_students(self.current_branch, self.current_year)
         query = self.search_var.get().lower()
-        
+
         for s in students:
-            is_match = query in str(s['id']).lower() or query in str(s['name']).lower()
-            if is_match:
-                report = self.ai.analyze_student(s['avg_attendance'], s['avg_marks'], s['backlogs'], 7)
-                
-                if self.current_filter == "All" or report['level'] == self.current_filter:
-                    row = ctk.CTkFrame(self.list_frame, fg_color=COLORS["card"], height=55)
-                    row.pack(fill="x", pady=5)
-                    
-                    diag_btn = ctk.CTkButton(
-                        row, 
-                        text="DIAGNOSE", 
-                        width=120, 
-                        fg_color=COLORS["accent"], 
-                        text_color="black", 
-                        command=lambda d=s, r=report: self.open_deep_analysis(d, r)
-                    )
-                    diag_btn.pack(side="right", padx=20)
-                    
-                    name_lbl = ctk.CTkLabel(row, text=f"{s['id']} - {s['name']}", font=("Roboto", 12, "bold"))
-                    name_lbl.pack(side="left", padx=20)
-                    
-                    if report['level'] == "High":
-                        col = COLORS["danger"]
-                    elif report['level'] == "Medium":
-                        col = COLORS["warning"]
-                    else:
-                        col = COLORS["success"]
-                        
-                    risk_lbl = ctk.CTkLabel(row, text=f"{report['level']} RISK", text_color=col, font=("Arial", 11, "bold"))
-                    risk_lbl.pack(side="left", padx=20)
+            is_match = query in str(s.get('display_reg_no', '')).lower() or query in str(s.get('display_name', '')).lower()
+            if not is_match:
+                continue
+
+            # Merge full row data if available
+            reg_key = str(s.get('display_reg_no', ''))
+            full_row = {**s, **full_lookup.get(reg_key, {})}
+
+            # Run advanced analysis — pass year so first-year model activates
+            if self.adv_ai:
+                report = self.adv_ai.analyze(full_row, year=self.current_year)
+            else:
+                report = self.ai.analyze_student(
+                    s['avg_attendance'], s['avg_marks'], s['backlogs'], 7)
+
+            if self.current_filter != "All" and report['level'] != self.current_filter:
+                continue
+
+            row_frame = ctk.CTkFrame(self.list_frame, fg_color=COLORS["card"], height=55)
+            row_frame.pack(fill="x", pady=5)
+
+            diag_btn = ctk.CTkButton(
+                row_frame,
+                text="DIAGNOSE",
+                width=120,
+                fg_color=COLORS["accent"],
+                text_color="black",
+                command=lambda d=full_row, r=report: self.open_deep_analysis(d, r)
+            )
+            diag_btn.pack(side="right", padx=10)
+
+            # Risk level badge — three-tier: Low / Medium / High
+            lvl = report.get('level', 'Low')
+            if lvl == "High":
+                lvl_color = COLORS["danger"]
+            elif lvl == "Medium":
+                lvl_color = COLORS["warning"]
+            else:
+                lvl_color = COLORS["success"]
+
+            score_val = report.get('score', 0)
+            badge = report.get('status_badge', lvl.upper())
+            score_lbl = ctk.CTkLabel(
+                row_frame,
+                text=f"{score_val:.0f}  {lvl.upper()} RISK",
+                text_color=lvl_color,
+                font=("Arial", 11, "bold"),
+                width=155
+            )
+            score_lbl.pack(side="right", padx=5)
+
+            badge_lbl = ctk.CTkLabel(
+                row_frame,
+                text=badge,
+                fg_color=lvl_color,
+                text_color="white",
+                font=("Arial", 9, "bold"),
+                corner_radius=4,
+                width=70
+            )
+            badge_lbl.pack(side="right", padx=4)
+
+            name_lbl = ctk.CTkLabel(
+                row_frame,
+                text=f"{s.get('display_reg_no', 'N/A')} - {s.get('display_name', 'Unknown')}",
+                font=("Roboto", 12, "bold")
+            )
+            name_lbl.pack(side="left", padx=20)
 
     def open_deep_analysis(self, data, report):
         top = ctk.CTkToplevel(self)
-        top.geometry("1100x850")
+        top.geometry("1100x900")
         top.title("AcaDesk - Student Diagnosis")
         top.attributes("-topmost", True)
         top.configure(fg_color="#000")
-        
+
         scroll = ctk.CTkScrollableFrame(top, fg_color="transparent")
         scroll.pack(fill="both", expand=True, padx=10, pady=10)
-        
+
         # --- HEADER CARD ---
+        lvl = report.get('level', 'Low')
+        if lvl == "High":
+            r_color = COLORS["danger"]
+        elif lvl == "Medium":
+            r_color = COLORS["warning"]
+        else:
+            r_color = COLORS["success"]
+
         header_card = ctk.CTkFrame(scroll, fg_color=COLORS["card"], corner_radius=10)
         header_card.pack(fill="x", pady=(0, 10))
-        
-        r_color = COLORS["success"]
-        if report['level'] == "High":
-            r_color = COLORS["danger"]
-        elif report['level'] == "Medium":
-            r_color = COLORS["warning"]
-            
-        name_lbl = ctk.CTkLabel(header_card, text=f"🎓 {data['name']}", font=("Arial", 24, "bold"))
-        name_lbl.pack(side="left", padx=20, pady=15)
-        
-        score_lbl = ctk.CTkLabel(header_card, text=f"RISK SCORE: {report['score']} / 100", font=("Arial", 22, "bold"), text_color=r_color)
-        score_lbl.pack(side="right", padx=20)
-        
-        # --- NEW STUDENT PROFILE BAR ---
-        profile_bar = ctk.CTkFrame(scroll, fg_color="#1a1a1a", corner_radius=8, border_width=1, border_color="#333")
-        profile_bar.pack(fill="x", pady=(0, 20), padx=5)
-        
-        reg_no = str(data.get('id', 'N/A'))
-        self._profile_badge(profile_bar, "Registration No:", reg_no)
-        
-        cgpa_marks = str(data.get('avg_marks', 'N/A'))
-        self._profile_badge(profile_bar, "CGPA / Marks:", f"{cgpa_marks}%")
-        
+
+        # Left: student name + status badge
+        left_h = ctk.CTkFrame(header_card, fg_color="transparent")
+        left_h.pack(side="left", padx=20, pady=12)
+        ctk.CTkLabel(left_h, text=f"\U0001f393  {data.get('display_name', 'Unknown')}",
+                     font=("Arial", 20, "bold"), text_color="white").pack(anchor="w")
+        badge_txt = report.get('status_badge', lvl.upper())
+        ctk.CTkLabel(left_h, text=badge_txt, fg_color=r_color, text_color="white",
+                     font=("Arial", 9, "bold"), corner_radius=4, width=80).pack(anchor="w", pady=(3,0))
+
+        # Right: score + model
+        right_h = ctk.CTkFrame(header_card, fg_color="transparent")
+        right_h.pack(side="right", padx=20, pady=12)
+        score_val = report.get('score', 0)
+        ctk.CTkLabel(right_h,
+                     text=f"RISK SCORE: {score_val:.0f} / 100   |   {lvl.upper()} RISK",
+                     font=("Arial", 17, "bold"), text_color=r_color).pack(anchor="e")
+        model_txt = report.get('model_used', '')
+        year_txt  = str(self.current_year) if self.current_year else ''
+        ctk.CTkLabel(right_h, text=f"{model_txt}  ·  {year_txt}  ·  Confidence: {report.get('confidence','?')}",
+                     font=("Arial", 10), text_color="#888").pack(anchor="e", pady=(3,0))
+
+        # --- PROFILE BAR ---
+        profile_bar = ctk.CTkFrame(scroll, fg_color="#1a1a1a", corner_radius=8,
+                                   border_width=1, border_color="#333")
+        profile_bar.pack(fill="x", pady=(0, 15), padx=5)
+        self._profile_badge(profile_bar, "Reg No:", str(data.get('display_reg_no', 'N/A')))
+        self._profile_badge(profile_bar, "Avg Marks:", f"{data.get('avg_marks', 'N/A')}%")
+        self._profile_badge(profile_bar, "Attendance:", f"{data.get('avg_attendance', 'N/A')}%")
+        self._profile_badge(profile_bar, "Backlogs:", str(data.get('backlogs', 0)))
         branch_name = self.translator.get_name(self.current_branch)
         self._profile_badge(profile_bar, "Department:", branch_name)
-        
-        # Attempts to pull 'phone', defaults to 'email', then defaults to 'Not Provided'
-        contact_info = str(data.get('phone', data.get('email', 'Not Provided')))
-        self._profile_badge(profile_bar, "Contact Info:", contact_info)
-        
-        # --- GRID FRAME (AI Insights & Charts) ---
-        grid_frame = ctk.CTkFrame(scroll, fg_color="transparent")
-        grid_frame.pack(fill="x", pady=10)
-        
-        # Left Info Panel
-        l_info = ctk.CTkFrame(grid_frame, fg_color=COLORS["card"])
-        l_info.pack(side="left", fill="both", expand=True, padx=(0, 5))
-        
-        dom_factor = str(report.get('dominant', 'N/A'))
-        self.add_line(l_info, "Risk Factor:", dom_factor, color="#FF5555")
-        
-        ai_action = str(report.get('action', 'N/A'))
-        self.add_line(l_info, "AI Advice:", ai_action, color="orange")
-        
-        att_val = str(data['avg_attendance'])
-        self.add_line(l_info, "Attendance:", f"{att_val}%")
-        
-        bkl_val = str(data['backlogs'])
-        self.add_line(l_info, "Backlogs:", bkl_val)
+        self._profile_badge(profile_bar, "Year:", str(self.current_year or 'N/A'))
 
-        # Right Charts Panel
-        r_info = ctk.CTkFrame(grid_frame, fg_color=COLORS["card"])
+        # --- FACTOR BREAKDOWN + CONTRIBUTION CHART (side by side) ---
+        grid_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        grid_frame.pack(fill="x", pady=5)
+
+        # Left: Factor scores
+        l_info = ctk.CTkFrame(grid_frame, fg_color=COLORS["card"], corner_radius=8)
+        l_info.pack(side="left", fill="both", expand=True, padx=(0, 5))
+        ctk.CTkLabel(l_info, text="RISK DOMAIN SCORES",
+                     font=("Arial", 12, "bold"), text_color=COLORS["accent"]).pack(anchor="w", padx=12, pady=(10, 5))
+
+        factors = report.get('domain_scores', {})
+        if factors:
+            for fname, fval in factors.items():
+                label = fname.replace('_', ' ').title()
+                if fval == "N/A" or fval is None:
+                    self.add_line(l_info, f"  {label}:", "N/A", color="#555")
+                    continue
+                try:
+                    fnum = float(fval)
+                except (TypeError, ValueError):
+                    self.add_line(l_info, f"  {label}:", str(fval), color="#555")
+                    continue
+                # domain_scores are 0-100 quality (100=perfect); invert for risk colour
+                risk_pct = 100.0 - fnum
+                fc = COLORS["danger"] if risk_pct >= 65 else (COLORS["warning"] if risk_pct >= 40 else COLORS["success"])
+                self.add_line(l_info, f"  {label}:", f"{fnum:.1f} / 100", color=fc)
+
+        # Right: Contribution bar chart
+        r_info = ctk.CTkFrame(grid_frame, fg_color=COLORS["card"], corner_radius=8)
         r_info.pack(side="left", fill="both", expand=True, padx=(5, 0))
-        
+        ctk.CTkLabel(r_info, text="FACTOR CONTRIBUTIONS TO RISK SCORE",
+                     font=("Arial", 12, "bold"), text_color=COLORS["accent"]).pack(anchor="w", padx=12, pady=(10, 5))
+
         try:
-            fig_r = Figure(figsize=(4, 2), dpi=80)
+            c_data = report.get('contributions', {})
+            if not c_data:
+                # Fallback: derive from domain_scores
+                ds = report.get('domain_scores', {})
+                c_data = {k.replace('_', ' ').title(): round(100.0 - float(v), 1)
+                          for k, v in ds.items() if isinstance(v, (int, float))}
+            c_keys = list(c_data.keys())[:8]
+            c_vals = [float(c_data[k]) if isinstance(c_data[k], (int, float)) else 0.0 for k in c_keys]
+            bar_colors = [
+                COLORS["danger"] if v >= 70 else (COLORS["warning"] if v >= 40 else COLORS["success"])
+                for v in c_vals
+            ]
+            fig_r = Figure(figsize=(4.5, max(2.0, len(c_keys) * 0.55)), dpi=80)
             fig_r.patch.set_facecolor(COLORS["card"])
-            
             ax_r = fig_r.add_subplot(111)
             ax_r.set_facecolor(COLORS["card"])
-            
-            c_data = report.get('contributions', {"Att": 30, "Marks": 50, "Bkl": 20})
-            
-            c_keys = list(c_data.keys())
-            c_vals = list(c_data.values())
-            c_colors = [COLORS["accent"], COLORS["danger"], "orange"]
-            
-            ax_r.barh(c_keys, c_vals, color=c_colors)
+            ax_r.barh(c_keys, c_vals, color=bar_colors, height=0.5)
+            ax_r.set_xlim(0, 100)
             ax_r.tick_params(colors='white', labelsize=8)
-            
+            for spine in ax_r.spines.values():
+                spine.set_color('#333')
+            fig_r.tight_layout(pad=0.5)
             can_r = FigureCanvasTkAgg(fig_r, master=r_info)
-            wid_r = can_r.get_tk_widget()
-            wid_r.pack(fill="both", expand=True, padx=10)
-        except Exception as e:
+            can_r.get_tk_widget().pack(fill="both", expand=True, padx=10, pady=5)
+        except Exception:
             pass
 
-        # Bottom Trend Line Chart
-        t_card = ctk.CTkFrame(scroll, fg_color=COLORS["card"])
-        t_card.pack(fill="x", pady=20)
-        
-        try:
-            fig_t = Figure(figsize=(8, 2.5), dpi=80)
-            fig_t.patch.set_facecolor(COLORS["card"])
-            
-            ax_t = fig_t.add_subplot(111)
-            ax_t.set_facecolor(COLORS["card"])
-            
-            trend_vals = report.get('trend', [65, 70, 62, 68])
-            t_len = len(trend_vals)
-            ax_t.set_xticks(range(t_len))
-            
-            t_labels = ['Sem 1', 'Sem 2', 'Sem 3', 'Current']
-            ax_t.set_xticklabels(t_labels, color='white')
-            
-            ax_t.plot(trend_vals, marker='o', color=COLORS["accent"], linewidth=2)
-            ax_t.tick_params(colors='white')
-            
-            can_t = FigureCanvasTkAgg(fig_t, master=t_card)
-            wid_t = can_t.get_tk_widget()
-            wid_t.pack(fill="both", expand=True, padx=10)
-        except Exception as e:
-            pass
+        # ═══════════════════════════════════════════════════════
 
-        # Faculty Notes Section
-        n_card = ctk.CTkFrame(scroll, fg_color=COLORS["card"])
-        n_card.pack(fill="x", pady=20)
-        
-        note_lbl = ctk.CTkLabel(n_card, text="FACULTY NOTES", text_color="gray")
-        note_lbl.pack(anchor="w", padx=20, pady=5)
-        
+        # --- AI INSIGHT PANEL ---
+        # All values come from the real risk engine — no simulator.
+        # ═══════════════════════════════════════════════════════
+        ai_card = ctk.CTkFrame(scroll, fg_color="#0c1220", corner_radius=10,
+                               border_width=1, border_color="#1e3a5f")
+        ai_card.pack(fill="x", pady=8, padx=2)
+
+        # ── Section header ──────────────────────────────────────
+        hdr = ctk.CTkFrame(ai_card, fg_color="#0f1e35", corner_radius=0)
+        hdr.pack(fill="x", pady=(0, 2))
+        ctk.CTkLabel(hdr, text="🧠  AI RISK INSIGHT  —  Explainable Risk Analysis",
+                     font=("Arial", 13, "bold"), text_color="#60A5FA").pack(side="left", padx=15, pady=10)
+        model_used  = report.get('model_used', 'Senior-Year Model')
+        confidence  = report.get('confidence', '?')
+        year_label  = f"Year {report.get('year', '?')}"
+        ctk.CTkLabel(hdr,
+                     text=f"{model_used}  ·  {year_label}  ·  Confidence: {confidence}",
+                     font=("Arial", 9), text_color="#4B6A8A").pack(side="right", padx=15)
+
+        # ── Model selection explanation ─────────────────────────
+        is_first = report.get('is_first_year', False)
+        if is_first:
+            model_reason = (
+                "📌  First-Year Model selected — uses Academic Background (prior education) as a key "
+                "predictor since no historical GPA or backlog data exists yet. Attendance, Internal "
+                "Marks, and Mid Exam performance are the primary in-semester indicators."
+            )
+        else:
+            model_reason = (
+                "📌  Senior-Year Model selected — CGPA and Backlogs carry 25% each as the strongest "
+                "predictors of progression risk. Attendance (20%) and internal performance (20%) are "
+                "also weighted. All factors are normalized to active data only."
+            )
+        ctk.CTkLabel(ai_card, text=model_reason, wraplength=1000, justify="left",
+                     font=("Arial", 10), text_color="#7CA9CC").pack(anchor="w", padx=15, pady=(6, 2))
+
+        # ── Divider ─────────────────────────────────────────────
+        ctk.CTkFrame(ai_card, height=1, fg_color="#1e3a5f").pack(fill="x", padx=15, pady=6)
+
+        # ── Factor breakdown table header ───────────────────────
+        ctk.CTkLabel(ai_card,
+                     text="FACTOR ANALYSIS  —  What the AI used and why",
+                     font=("Arial", 11, "bold"), text_color="#93C5FD").pack(anchor="w", padx=15, pady=(2, 4))
+
+        # Column headers
+        col_hdr = ctk.CTkFrame(ai_card, fg_color="#101c2e", corner_radius=4)
+        col_hdr.pack(fill="x", padx=15, pady=(0, 3))
+        for htext, w in [("Factor", 200), ("Your Value", 110), ("Risk Level", 100),
+                          ("Contribution to Score", 200), ("Status", 100)]:
+            ctk.CTkLabel(col_hdr, text=htext, font=("Arial", 9, "bold"),
+                         text_color="#4B7CB3", width=w, anchor="w").pack(side="left", padx=6, pady=5)
+
+        # ── Per-factor rows ─────────────────────────────────────
+        FACTOR_INFO = {
+            # domain_name → (display, weight_1st, weight_senior, value_key, unit, good_threshold)
+            "attendance":          ("Attendance",         "25%", "20%", "attendance_pct",    "%",   "≥80% good"),
+            "academic_background": ("Academic Background","20%", "—",   "tenth_percentage",  "%",   "≥60% good"),
+            "internal_marks":      ("Internal Marks",     "15%", "10%", "internal_marks",    "%",   "≥75% good"),
+            "mid_exam":            ("Mid Exam",           "15%", "10%", "mid_exam_score",    "%",   "≥75% good"),
+            "assignments":         ("Assignments",        "10%", "5%",  "assignment_marks",  "%",   "≥75% good"),
+            "lab":                 ("Lab Performance",    "5%",  "5%",  "lab_marks",         "%",   "≥75% good"),
+            "cons_absences":       ("Consecutive Absences","5%","3%",   "consecutive_absences","days","0 is ideal"),
+            "leave_frequency":     ("Leave Frequency",    "5%",  "3%",  "leave_frequency",   "days","≤2 ideal"),
+            "cgpa_marks":          ("CGPA / GPA",         "—",   "25%", "cgpa",              "pts", "≥7.5 good"),
+            "backlogs":            ("Active Backlogs",    "—",   "25%", "backlog_count",      "nos", "0 ideal"),
+            "trend":               ("Performance Trend",  "—",   "5%",  None,                "",    "improving"),
+        }
+
+        raw_features = report.get('features', {})   # labeled dict
+        domain_shap  = {}                            # compute from contributions
+        # Map labeled contribution keys back to domain names
+        LABEL_TO_DOMAIN = {
+            "Attendance": "attendance", "Academic Background": "academic_background",
+            "Internal Marks": "internal_marks", "Mid Exam": "mid_exam",
+            "Assignments": "assignments", "Lab Performance": "lab",
+            "Consecutive Absences": "cons_absences", "Leave Frequency": "leave_frequency",
+            "CGPA / GPA": "cgpa_marks", "Backlogs": "backlogs",
+            "Performance Trend": "trend",
+        }
+        contribs = report.get('contributions', {})
+        for label_key, val in contribs.items():
+            dom = LABEL_TO_DOMAIN.get(label_key, label_key.lower().replace(' ', '_'))
+            domain_shap[dom] = val
+
+        domain_scores_raw = report.get('domain_scores', {})
+        total_score = report.get('score', 0)
+
+        # Build rows for domains that are active (have a contribution)
+        active_domains = list(domain_shap.keys())
+        # Also include N/A domains so user sees what was MISSING
+        all_domains = active_domains + [d for d in FACTOR_INFO if d not in active_domains]
+
+        row_bg_toggle = ["#0c1a2e", "#0d1f35"]
+        for i, domain in enumerate(all_domains):
+            info = FACTOR_INFO.get(domain)
+            if not info:
+                continue
+            disp_name, w1, w_sr, val_key, unit, good_str = info
+            weight_used = w1 if is_first else w_sr
+            if weight_used == "—":
+                # This factor doesn't exist in the selected model — skip completely
+                continue
+
+            contrib = domain_shap.get(domain)
+            quality  = domain_scores_raw.get(domain)
+
+            # Determine displayed value
+            displayed_val = "N/A"
+            if val_key:
+                # Try labeled feature dict first
+                label_lookup = val_key.replace("_", " ").title()
+                for k, v in raw_features.items():
+                    if k.lower().replace(" ","_") == val_key:
+                        displayed_val = f"{v:.1f} {unit}"
+                        break
+                else:
+                    # Direct from data dict
+                    for src_key in (val_key, val_key.replace("_pct",""),
+                                    val_key.replace("_count","s")):
+                        v = data.get(src_key)
+                        if v is None:
+                            v = data.get(f"avg_{src_key}")
+                        if v is not None:
+                            try:
+                                displayed_val = f"{float(v):.1f} {unit}"
+                            except Exception:
+                                displayed_val = str(v)
+                            break
+
+            # Risk level for this factor
+            if quality == "N/A" or quality is None:
+                fac_risk = "N/A"
+                fac_color = "#555"
+            else:
+                try:
+                    q = float(quality)
+                    if q >= 75:
+                        fac_risk, fac_color = "Good", "#4ADE80"
+                    elif q >= 55:
+                        fac_risk, fac_color = "Acceptable", "#FCD34D"
+                    elif q >= 35:
+                        fac_risk, fac_color = "Concern", COLORS["warning"]
+                    else:
+                        fac_risk, fac_color = "High Risk", COLORS["danger"]
+                except Exception:
+                    fac_risk, fac_color = "N/A", "#555"
+
+            # Contribution bar
+            if contrib is not None and total_score > 0:
+                bar_pct = min(100, round(contrib / total_score * 100))
+                bar_txt = f"{contrib:.1f} pts  ({bar_pct}% of score)"
+                bar_col = COLORS["danger"] if bar_pct >= 30 else (COLORS["warning"] if bar_pct >= 15 else "#2563EB")
+            else:
+                bar_txt = "Not used (data missing)"
+                bar_col = "#333"
+                bar_pct = 0
+
+            # Status
+            if contrib is None:
+                status_txt, status_col = "Excluded", "#555"
+            elif bar_pct >= 35:
+                status_txt, status_col = "⚠ Major Driver", COLORS["danger"]
+            elif bar_pct >= 15:
+                status_txt, status_col = "▲ Contributing", COLORS["warning"]
+            else:
+                status_txt, status_col = "✓ Low Impact", "#4ADE80"
+
+            row_bg = row_bg_toggle[i % 2]
+            row_f = ctk.CTkFrame(ai_card, fg_color=row_bg, corner_radius=3)
+            row_f.pack(fill="x", padx=15, pady=1)
+
+            # Col 1: Factor name + weight
+            col1 = ctk.CTkFrame(row_f, fg_color="transparent", width=200)
+            col1.pack(side="left", padx=6, pady=5)
+            ctk.CTkLabel(col1, text=disp_name,
+                         font=("Arial", 10, "bold"), text_color="white",
+                         width=200, anchor="w").pack(anchor="w")
+            ctk.CTkLabel(col1, text=f"Weight: {weight_used}",
+                         font=("Arial", 8), text_color="#4B6A8A",
+                         width=200, anchor="w").pack(anchor="w")
+
+            # Col 2: Value
+            ctk.CTkLabel(row_f, text=displayed_val,
+                         font=("Arial", 10), text_color="#CBD5E1",
+                         width=110, anchor="w").pack(side="left", padx=6)
+
+            # Col 3: Risk level
+            ctk.CTkLabel(row_f, text=fac_risk,
+                         font=("Arial", 10, "bold"), text_color=fac_color,
+                         width=100, anchor="w").pack(side="left", padx=6)
+
+            # Col 4: Contribution bar
+            col4 = ctk.CTkFrame(row_f, fg_color="transparent", width=200)
+            col4.pack(side="left", padx=6)
+            ctk.CTkLabel(col4, text=bar_txt,
+                         font=("Arial", 9), text_color=bar_col,
+                         width=200, anchor="w").pack(anchor="w")
+            if bar_pct > 0:
+                bar_bg = ctk.CTkFrame(col4, fg_color="#1a2a3a", height=6,
+                                      corner_radius=3, width=180)
+                bar_bg.pack(anchor="w")
+                bar_bg.pack_propagate(False)
+                filled_w = max(4, int(bar_pct * 1.8))
+                ctk.CTkFrame(bar_bg, fg_color=bar_col, height=6,
+                              corner_radius=3, width=filled_w).pack(side="left")
+
+            # Col 5: Status
+            ctk.CTkLabel(row_f, text=status_txt,
+                         font=("Arial", 9, "bold"), text_color=status_col,
+                         width=120, anchor="w").pack(side="left", padx=6)
+
+        # ── SHAP summary line ───────────────────────────────────
+        ctk.CTkFrame(ai_card, height=1, fg_color="#1e3a5f").pack(fill="x", padx=15, pady=(8, 4))
+        shap_parts = []
+        for label_key, val in list(contribs.items())[:5]:
+            shap_parts.append(f"{label_key}: +{val:.1f}")
+        shap_line = "  |  ".join(shap_parts)
+        if shap_parts:
+            ctk.CTkLabel(ai_card,
+                         text=f"SHAP BREAKDOWN  →  {shap_line}  →  Total: {total_score:.0f}/100",
+                         font=("Courier", 9), text_color="#4B7CB3").pack(anchor="w", padx=15, pady=(0, 4))
+
+        # ── Natural language explanation ────────────────────────
+        ctk.CTkFrame(ai_card, height=1, fg_color="#1e3a5f").pack(fill="x", padx=15, pady=(0, 6))
+        ctk.CTkLabel(ai_card, text="AI EXPLANATION",
+                     font=("Arial", 10, "bold"), text_color="#93C5FD").pack(anchor="w", padx=15)
+        explanation = report.get('explanation', '')
+        ctk.CTkLabel(ai_card, text=explanation if explanation else "No explanation available.",
+                     wraplength=1000, justify="left",
+                     font=("Arial", 11), text_color="#D1D5DB").pack(anchor="w", padx=15, pady=(4, 10))
+
+        # ── Early warning alerts ────────────────────────────────
+        alerts = report.get('alerts', [])
+        if alerts:
+            ctk.CTkFrame(ai_card, height=1, fg_color="#1e3a5f").pack(fill="x", padx=15, pady=(0, 6))
+            ctk.CTkLabel(ai_card, text="⚠  EARLY WARNING SIGNALS",
+                         font=("Arial", 10, "bold"), text_color="#F59E0B").pack(anchor="w", padx=15)
+            for alert in alerts:
+                ctk.CTkLabel(ai_card, text=f"  {alert}", wraplength=1000, justify="left",
+                             font=("Arial", 10), text_color="#FDE68A").pack(anchor="w", padx=18, pady=1)
+            ctk.CTkFrame(ai_card, height=8, fg_color="transparent").pack()
+
+        # ── Missing data note ───────────────────────────────────
+        missing = report.get('missing', [])
+        if missing:
+            ctk.CTkLabel(ai_card,
+                         text=f"ℹ  Data unavailable for: {', '.join(missing[:6])}  — these factors were excluded from scoring.",
+                         wraplength=1000, justify="left",
+                         font=("Arial", 9, "italic"), text_color="#374151").pack(anchor="w", padx=15, pady=(2, 10))
+
+        # --- RECOMMENDATIONS ---
+        recommendations = report.get('recommendations', [])
+        if recommendations:
+            rec_card = ctk.CTkFrame(scroll, fg_color="#0a1f0d", corner_radius=8,
+                                    border_width=1, border_color="#166534")
+            rec_card.pack(fill="x", pady=8)
+            ctk.CTkLabel(rec_card, text="✅  RECOMMENDED ACTIONS",
+                         font=("Arial", 13, "bold"), text_color="#4ADE80").pack(anchor="w", padx=15, pady=(12, 4))
+            for rec in recommendations:
+                if isinstance(rec, dict):
+                    txt = f"{rec.get('action','?')} — {rec.get('reason','')}"
+                else:
+                    txt = str(rec)
+                ctk.CTkLabel(rec_card, text=f"  •  {txt}", wraplength=980, justify="left",
+                             font=("Arial", 11), text_color="#D1FAE5").pack(anchor="w", padx=15, pady=2)
+            ctk.CTkFrame(rec_card, height=10, fg_color="transparent").pack()
+
+        # --- PERFORMANCE TREND (only when present) ---
+        trend_vals = report.get('trend', [])
+        if trend_vals:
+            t_card = ctk.CTkFrame(scroll, fg_color=COLORS["card"], corner_radius=8)
+            t_card.pack(fill="x", pady=8)
+            ctk.CTkLabel(t_card, text="PERFORMANCE TREND",
+                         font=("Arial", 12, "bold"), text_color=COLORS["accent"]).pack(anchor="w", padx=12, pady=(10, 2))
+            try:
+                fig_t = Figure(figsize=(8, 2.5), dpi=80)
+                fig_t.patch.set_facecolor(COLORS["card"])
+                ax_t = fig_t.add_subplot(111)
+                ax_t.set_facecolor(COLORS["card"])
+                t_len = len(trend_vals)
+                ax_t.set_xticks(range(t_len))
+                ax_t.set_xticklabels([f"Sem {i+1}" for i in range(t_len)], color='white')
+                ax_t.plot(trend_vals, marker='o', color=COLORS["accent"], linewidth=2)
+                ax_t.tick_params(colors='white')
+                fig_t.tight_layout(pad=0.5)
+                can_t = FigureCanvasTkAgg(fig_t, master=t_card)
+                can_t.get_tk_widget().pack(fill="both", expand=True, padx=10, pady=5)
+            except Exception:
+                pass
+
+        # --- FACULTY NOTES ---
+        n_card = ctk.CTkFrame(scroll, fg_color=COLORS["card"], corner_radius=8)
+        n_card.pack(fill="x", pady=15)
+        ctk.CTkLabel(n_card, text="FACULTY NOTES", text_color="gray",
+                     font=("Arial", 11, "bold")).pack(anchor="w", padx=20, pady=(10, 2))
         self.txt_note = ctk.CTkTextbox(n_card, height=80, fg_color=COLORS["input_bg"])
-        self.txt_note.pack(fill="x", padx=20, pady=10)
-        
+        self.txt_note.pack(fill="x", padx=20, pady=5)
+
         def save_note():
             ModernMessagebox("Saved", "Note stored.", "success")
-            
-        save_n = ctk.CTkButton(n_card, text="SAVE NOTES", fg_color="#333", command=save_note)
-        save_n.pack(pady=10)
-        
-        close_btn = ctk.CTkButton(scroll, text="CLOSE DIAGNOSIS", command=top.destroy)
-        close_btn.pack(pady=10)
+
+        ctk.CTkButton(n_card, text="SAVE NOTES", fg_color="#333", command=save_note).pack(pady=10)
+        ctk.CTkButton(scroll, text="CLOSE DIAGNOSIS", fg_color=COLORS["danger"],
+                      text_color="white", command=top.destroy).pack(pady=10)
 
     def export_report(self):
         try:
@@ -758,333 +1303,6 @@ class AnalyticsPanel(ctk.CTkFrame):
             widget.destroy()
 
 # ====================================================
-#  ENTERPRISE ERP WIZARD
-# ====================================================
-
-class ERPWizard(ctk.CTkFrame):
-    def __init__(self, parent, controller, dash):
-        super().__init__(parent, fg_color="#111")
-        self.controller = controller
-        self.dash = dash
-        self.current_step = 1
-        
-        self.s1 = None
-        self.s2 = None
-        self.s3 = None
-        
-        self.container = ctk.CTkFrame(self, corner_radius=20, fg_color="#1a1a1a")
-        self.container.pack(fill="both", expand=True, padx=120, pady=40)
-        
-        self.header = ctk.CTkFrame(self.container, fg_color="transparent")
-        self.header.pack(fill="x", pady=(30, 10), padx=30)
-        
-        head_lbl = ctk.CTkLabel(self.header, text="ENTERPRISE ERP SETUP", font=("Arial Black", 24))
-        head_lbl.pack(anchor="w")
-        
-        self.step_lbl = ctk.CTkLabel(self.header, text="Step 1 of 3", text_color="gray")
-        self.step_lbl.pack(anchor="w")
-        
-        self.main_body = ctk.CTkFrame(self.container, fg_color="transparent")
-        self.main_body.pack(fill="both", expand=True, padx=20, pady=10)
-        
-        self.footer = ctk.CTkFrame(self.container, fg_color="transparent")
-        self.footer.pack(fill="x", padx=40, pady=20, side="bottom")
-        
-        self.btn_back = ctk.CTkButton(self.footer, text="← BACK", height=45, fg_color="#333", command=self.prev_step)
-        self.btn_next = ctk.CTkButton(self.footer, text="NEXT STEP →", height=45, fg_color="#00E5FF", text_color="black", command=self.next_step)
-        self.btn_save = ctk.CTkButton(self.footer, text="SAVE CONFIG", height=45, fg_color="#00C853", state="disabled", command=self.save)
-        
-        self.init_steps()
-        self.show_step(1)
-
-    def init_steps(self):
-        # Step 1
-        self.s1, f1 = self.create_layout("1. Connection", "Provide Server Credentials.")
-        self.db_tech = self.add_labeled_dropdown(f1, "Database Technology:", ["MySQL / MariaDB", "PostgreSQL", "MS SQL Server", "Oracle"])
-        self.host = self.add_labeled_entry(f1, "Host IP:", "localhost")
-        self.port = self.add_labeled_entry(f1, "Port:", "3306")
-        self.db_name = self.add_labeled_entry(f1, "DB Name:", "engineering_college")
-        self.user = self.add_labeled_entry(f1, "User:", "root")
-        self.pwd = self.add_labeled_entry(f1, "Password:", "", True)
-        
-        # Step 2
-        self.s2, f2 = self.create_layout("2. Architecture", "Define table relationships.")
-        self.t_stud = self.add_labeled_entry(f2, "Student Table:", "student")
-        self.t_acad = self.add_labeled_entry(f2, "Academics Table:", "academics")
-        self.t_bran = self.add_labeled_entry(f2, "Branch Table:", "branch")
-        self.k_stud = self.add_labeled_entry(f2, "Student Key:", "student_id")
-        self.k_bran = self.add_labeled_entry(f2, "Branch Key:", "branch_id")
-        
-        # Step 3
-        self.s3, f3 = self.create_layout("3. Mapping", "Finalize column logic mapping.")
-        self.c_id = self.add_labeled_entry(f3, "Reg No Col:", "roll_no")
-        self.c_na = self.add_labeled_entry(f3, "Name Col:", "name")
-        self.c_br = self.add_labeled_entry(f3, "Branch Name Col:", "branch_name")
-        self.c_at = self.add_labeled_entry(f3, "Attendance Col:", "attendance")
-        self.c_mk = self.add_labeled_entry(f3, "Marks/GPA Col:", "internal_marks")
-        self.c_bk = self.add_labeled_entry(f3, "Backlogs Col:", "backlogs")
-
-    def create_layout(self, title, desc):
-        frame = ctk.CTkFrame(self.main_body, fg_color="transparent")
-        frame.pack(fill="both", expand=True)
-        
-        form_scroll = ctk.CTkScrollableFrame(frame, fg_color="transparent")
-        form_scroll.pack(side="left", fill="both", expand=True, padx=10)
-        
-        info_panel = ctk.CTkFrame(frame, fg_color=COLORS["card"], corner_radius=15, width=300)
-        info_panel.pack(side="right", fill="y", padx=10)
-        info_panel.pack_propagate(False)
-        
-        ctk.CTkLabel(info_panel, text=title, font=("Arial", 18, "bold"), text_color="#00E5FF").pack(pady=20)
-        ctk.CTkLabel(info_panel, text=desc, text_color="#ccc", wraplength=250, justify="left").pack(padx=20)
-        
-        return frame, form_scroll
-
-    def add_labeled_entry(self, parent, label_text, default_value, secret=False):
-        row = ctk.CTkFrame(parent, fg_color="transparent")
-        row.pack(fill="x", pady=12)
-        row.grid_columnconfigure(1, weight=1)
-        
-        lbl = ctk.CTkLabel(row, text=label_text, font=("Arial", 12, "bold"), anchor="w", width=180)
-        lbl.grid(row=0, column=0, sticky="w")
-        
-        entry = ctk.CTkEntry(row, height=45)
-        entry.insert(0, default_value)
-        if secret: 
-            entry.configure(show="*")
-            
-        entry.grid(row=0, column=1, sticky="ew", padx=(20, 50))
-        return entry
-
-    def add_labeled_dropdown(self, parent, lbl_text, values):
-        row = ctk.CTkFrame(parent, fg_color="transparent")
-        row.pack(fill="x", pady=10)
-        row.grid_columnconfigure(1, weight=1)
-        
-        lbl = ctk.CTkLabel(row, text=lbl_text, width=180, anchor="w", font=("Arial", 12, "bold"))
-        lbl.grid(row=0, column=0, sticky="w")
-        
-        dropdown = ctk.CTkComboBox(row, values=values, height=45)
-        dropdown.grid(row=0, column=1, sticky="ew", padx=(20, 50))
-        return dropdown
-
-    def show_step(self, s):
-        self.current_step = s
-        
-        self.s1.pack_forget()
-        self.s2.pack_forget()
-        self.s3.pack_forget()
-        
-        self.btn_back.pack_forget()
-        self.btn_next.pack_forget()
-        self.btn_save.pack_forget()
-        
-        self.step_lbl.configure(text=f"Step {s} of 3")
-        
-        if s == 1:
-            self.s1.pack(fill="both", expand=True)
-            self.btn_next.configure(text="NEXT STEP →")
-            self.btn_next.pack(side="right")
-        elif s == 2:
-            self.s2.pack(fill="both", expand=True)
-            self.btn_back.pack(side="left")
-            self.btn_next.configure(text="NEXT STEP →")
-            self.btn_next.pack(side="right")
-        elif s == 3:
-            self.s3.pack(fill="both", expand=True)
-            self.btn_back.pack(side="left")
-            self.btn_next.configure(text="OVERALL TEST ⚡", fg_color="#FF9100")
-            self.btn_next.pack(side="right", padx=10)
-            self.btn_save.pack(side="right")
-
-    def next_step(self):
-        if self.current_step < 3:
-            self.show_step(self.current_step + 1)
-        else:
-            self.perform_overall_test()
-
-    def perform_overall_test(self):
-        # --- LAYER 1: FORM VALIDATION (Pre-Checks) ---
-        host_val = self.host.get().strip()
-        user_val = self.user.get().strip()
-        pass_val = self.pwd.get().strip()
-        db_val = self.db_name.get().strip()
-        port_raw = self.port.get().strip()
-        
-        tech = self.db_tech.get()
-        
-        # Check if any connection fields are empty
-        if not host_val:
-            ModernMessagebox("Missing Information", "Please enter the Database Host Address (e.g., localhost or an IP).", "warning")
-            return
-        if not user_val:
-            ModernMessagebox("Missing Information", "Please enter the Database Username (e.g., root).", "warning")
-            return
-        if not pass_val:
-            ModernMessagebox("Missing Information", "The Password field is empty. Please enter your database password.", "warning")
-            return
-        if not db_val:
-            ModernMessagebox("Missing Information", "Please specify the Database Name you want to connect to.", "warning")
-            return
-        if not port_raw.isdigit():
-            ModernMessagebox("Invalid Port", "The Port number must be a valid number (e.g., 3306).", "warning")
-            return
-            
-        port_val = int(port_raw)
-        
-        # Check if any Schema Mapping fields are empty
-        student_tbl = self.t_stud.get().strip()
-        acad_tbl = self.t_acad.get().strip()
-        id_col = self.c_id.get().strip()
-        name_col = self.c_na.get().strip()
-        att_col = self.c_at.get().strip()
-        join_key = self.k_stud.get().strip()
-        
-        if not all([student_tbl, acad_tbl, id_col, name_col, att_col, join_key]):
-            ModernMessagebox("Missing Mapping", "Please ensure all table and column mapping fields are filled out.", "warning")
-            return
-
-        try:
-            # Build the universal SQL test query
-            sql_test = f"SELECT s.{id_col}, s.{name_col}, a.{att_col} FROM {student_tbl} s JOIN {acad_tbl} a ON s.{join_key} = a.{join_key} LIMIT 3"
-            samples = []
-
-            # --- LAYER 2: DATABASE CONNECTION LOGIC ---
-            if tech == "MySQL / MariaDB":
-                import mysql.connector
-                conn = mysql.connector.connect(
-                    host=host_val, user=user_val, password=pass_val, 
-                    database=db_val, port=port_val, connect_timeout=3
-                )
-                cursor = conn.cursor(dictionary=True)
-                cursor.execute(sql_test)
-                samples = cursor.fetchall()
-                conn.close()
-
-            elif tech == "PostgreSQL":
-                import psycopg2
-                import psycopg2.extras
-                conn = psycopg2.connect(
-                    host=host_val, user=user_val, password=pass_val, 
-                    dbname=db_val, port=port_val, connect_timeout=3
-                )
-                cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-                cursor.execute(sql_test)
-                samples = [dict(row) for row in cursor.fetchall()]
-                conn.close()
-
-            elif tech == "MS SQL Server":
-                import pyodbc
-                conn_str = f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={host_val},{port_val};DATABASE={db_val};UID={user_val};PWD={pass_val}"
-                conn = pyodbc.connect(conn_str, timeout=3)
-                cursor = conn.cursor()
-                cursor.execute(sql_test)
-                columns = [column[0] for column in cursor.description]
-                samples = [dict(zip(columns, row)) for row in cursor.fetchall()]
-                conn.close()
-
-            elif tech == "Oracle":
-                import oracledb
-                dsn = f"{host_val}:{port_val}/{db_val}"
-                conn = oracledb.connect(user=user_val, password=pass_val, dsn=dsn)
-                cursor = conn.cursor()
-                cursor.execute(sql_test)
-                columns = [col[0].lower() for col in cursor.description]
-                samples = [dict(zip(columns, row)) for row in cursor.fetchall()]
-                conn.close()
-
-            # --- LAYER 3: PREVIEW GENERATION ---
-            if samples:
-                msg_body = "VERIFIED! Sample Data Retrieved:\n"
-                msg_body += "-" * 40 + "\n"
-                for row in samples:
-                    row_vals = list(row.values())
-                    msg_body += f"ID: {row_vals[0]} | Name: {row_vals[1]} | Att: {row_vals[2]}%\n"
-                
-                # Unlock the SAVE button now that the test passed
-                self.btn_save.configure(state="normal")
-                ModernMessagebox("System Verified", msg_body, "success")
-            else:
-                raise ValueError("handshake success but no student data found")
-
-        # --- LAYER 4: HUMAN-FRIENDLY ERROR TRANSLATION ---
-        except Exception as e:
-            raw_error = str(e).lower()
-            
-            # 1. Login/Password Issues
-            if "access denied" in raw_error or "authentication failed" in raw_error or "password" in raw_error or "logon failed" in raw_error:
-                friendly_msg = "Access Denied: The username or password you entered is incorrect."
-                
-            # 2. Database Name Issues
-            elif "unknown database" in raw_error or "does not exist" in raw_error or "ora-12154" in raw_error:
-                friendly_msg = f"Database Not Found: We couldn't find a database named '{db_val}'. Please check the spelling."
-                
-            # 3. Connection / Offline Issues
-            elif "connection refused" in raw_error or "timeout" in raw_error or "network" in raw_error or "target machine actively refused" in raw_error:
-                friendly_msg = f"Server Offline: Could not reach the server at '{host_val}'. Please check if your database software is running and the port is open."
-                
-            # 4. Table Mapping Issues
-            elif "doesn't exist" in raw_error or "invalid table" in raw_error or "not found" in raw_error:
-                friendly_msg = "Table Missing: The student or academic table you typed in the setup wizard does not exist in this database."
-                
-            # 5. Column Mapping Issues
-            elif "unknown column" in raw_error or "invalid identifier" in raw_error:
-                friendly_msg = "Column Mismatch: One of the column names you mapped in the wizard does not match the actual database columns."
-                
-            # 6. Empty Data Catch
-            elif "handshake success but no student data found" in raw_error:
-                friendly_msg = "Data Empty: The system connected successfully, but the tables you specified are completely empty."
-                
-            # Fallback for weird system errors
-            else:
-                friendly_msg = f"An unexpected system error occurred:\n\n{str(e)}"
-
-            # Show the friendly error message
-            ModernMessagebox("Connection Failed", friendly_msg, "error")
-
-    def prev_step(self):
-        self.show_step(self.current_step - 1)
-    
-    def save(self):
-        college = self.controller.shared_data["college_name"]
-        tech = self.db_tech.get()
-        host = self.host.get()
-        port = self.port.get()
-        db = self.db_name.get()
-        user = self.user.get()
-        pwd = self.pwd.get()
-        
-        mapping = {
-            "tbl_student": self.t_stud.get(), 
-            "tbl_academic": self.t_acad.get(), 
-            "tbl_branch": self.t_bran.get(), 
-            "col_student_join": self.k_stud.get(), 
-            "col_branch_join": self.k_bran.get(), 
-            "col_id": self.c_id.get(), 
-            "col_name": self.c_na.get(), 
-            "col_branch_name": self.c_br.get(), 
-            "col_att": self.c_at.get(), 
-            "col_marks": self.c_mk.get(), 
-            "col_backlogs": self.c_bk.get(), 
-            "col_year": "year", 
-            "col_email": "email"
-        }
-        
-        if CentralAuth().save_erp_config(college, tech, host, port, db, user, pwd, mapping):
-            config_data = mapping.copy()
-            config_data["host"] = host
-            config_data["user"] = user
-            config_data["password"] = pwd
-            config_data["database"] = db
-            config_data["port"] = port
-            
-            self.controller.shared_data.update({
-                "erp_config": config_data, 
-                "erp_setup_needed": False
-            })
-            self.dash.on_show()
-
-# ====================================================
 #  DASHBOARD SCREEN
 # ====================================================
 
@@ -1098,23 +1316,19 @@ class DashboardScreen(ctk.CTkFrame):
         self.sidebar = Sidebar(self, controller, self)
         self.analytics = AnalyticsPanel(self, controller)
         self.faculty = FacultyManagerPanel(self, controller)
-        self.erp = ERPWizard(self, controller, self)
+        self.hod_manager = HODManagerPanel(self, controller)
 
     def on_show(self):
         self.sidebar.refresh()
-        needed = self.controller.shared_data.get("erp_setup_needed")
-        
-        if needed:
-            self.erp.grid(row=0, column=0, columnspan=2, sticky="nsew")
-            self.sidebar.grid_forget()
-        else:
-            self.sidebar.grid(row=0, column=0, sticky="nsew")
-            self.show_view("Analytics")
+        # Always show the sidebar and analytics view
+        self.sidebar.grid(row=0, column=0, sticky="nsew")
+        self.show_view("Analytics")
 
     def show_view(self, name):
         self.analytics.grid_forget()
         self.faculty.grid_forget()
-        self.erp.grid_forget()
+        self.hod_manager.grid_forget()
+
         
         if name == "Analytics":
             self.analytics.grid(row=0, column=1, sticky="nsew")
@@ -1122,6 +1336,9 @@ class DashboardScreen(ctk.CTkFrame):
         elif name == "Faculty":
             self.faculty.grid(row=0, column=1, sticky="nsew")
             self.faculty.refresh()
+        elif name == "HOD":
+            self.hod_manager.grid(row=0, column=1, sticky="nsew")
+            self.hod_manager.refresh()
 
     def open_change_pass(self):
         top = ctk.CTkToplevel(self)

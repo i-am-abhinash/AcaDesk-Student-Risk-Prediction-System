@@ -10,6 +10,7 @@ sys.path.append(current_dir)
 # IMPORT DASHBOARD
 from ui.dashboard import DashboardScreen
 from ui.login import LoginScreen, RegisterScreen
+from ui.startup import ERPSetupScreen, ConnectionDiagnosticsScreen
 
 # --- CONFIG & STYLES ---
 ctk.set_appearance_mode("Dark")
@@ -118,8 +119,22 @@ class RiskAnalysisApp(ctk.CTk):
             "college_name": "Setup Required",
             "erp_setup_needed": False,
             "erp_config": None,
-            "assigned_branch": None
+            "assigned_branch": None,
+            "assigned_department": None,
+            "is_hod": 0
         }
+
+        # Silently initialize the central and analytics databases
+        try:
+            from logic.central_db_handler import CentralDBHandler
+            from logic.analytics_db_handler import AnalyticsDBHandler
+            from logic.central_auth import CentralAuth
+            
+            CentralDBHandler().initialize_tables()
+            AnalyticsDBHandler().initialize_tables()
+            CentralAuth().initialize_tables()
+        except Exception as e:
+            print("Background DB Initialization Failed:", e)
 
         self.container = ctk.CTkFrame(self)
         self.container.pack(side="top", fill="both", expand=True)
@@ -127,7 +142,7 @@ class RiskAnalysisApp(ctk.CTk):
         self.container.grid_columnconfigure(0, weight=1)
 
         self.frames = {}
-        for F in (WelcomeScreen, RegisterScreen, DashboardScreen, LoginScreen):
+        for F in (WelcomeScreen, RegisterScreen, ERPSetupScreen, ConnectionDiagnosticsScreen, DashboardScreen, LoginScreen):
             page_name = F.__name__
             frame = F(parent=self.container, controller=self)
             self.frames[page_name] = frame
@@ -172,7 +187,7 @@ class WelcomeScreen(ctk.CTkFrame):
         self.login_box = ctk.CTkFrame(right_frame, fg_color="#1a1a1a", width=400, height=500, corner_radius=20)
         self.login_box.place(relx=0.5, rely=0.5, anchor="center")
 
-        ctk.CTkLabel(self.login_box, text="SECURE LOGIN", font=("Arial", 24, "bold"), text_color="white").pack(pady=(40, 30))
+        ctk.CTkLabel(self.login_box, text="SECURE LOGIN", font=("Arial", 24, "bold"), text_color="#00E5FF").pack(pady=(40, 30))
 
         self.entry_user = ctk.CTkEntry(self.login_box, placeholder_text="Username", width=300, height=50, font=("Roboto", 14))
         self.entry_user.pack(pady=10)
@@ -184,33 +199,27 @@ class WelcomeScreen(ctk.CTkFrame):
         role_frame = ctk.CTkFrame(self.login_box, fg_color="transparent")
         role_frame.pack(pady=20)
         
-        r1 = ctk.CTkRadioButton(role_frame, text="College Admin", variable=self.role_var, value="Admin", 
-                                fg_color="#00E5FF", text_color="white", command=self.toggle_register_btn)
+        r1 = ctk.CTkRadioButton(role_frame, text="Admin", variable=self.role_var, value="Admin", 
+                                fg_color="#00E5FF", text_color="white")
         r1.pack(side="left", padx=20)
         
         r2 = ctk.CTkRadioButton(role_frame, text="Faculty", variable=self.role_var, value="Faculty", 
-                                fg_color="#00E5FF", text_color="white", command=self.toggle_register_btn)
+                                fg_color="#00E5FF", text_color="white")
         r2.pack(side="left", padx=20)
 
         ctk.CTkButton(self.login_box, text="ACCESS DASHBOARD", width=300, height=50, fg_color="#00E5FF", text_color="black", font=("Arial", 14, "bold"),
                       command=self.login_logic).pack(pady=10)
 
         self.btn_reg = ctk.CTkButton(self.login_box, text="Register / Add Admin", fg_color="transparent", text_color="gray", hover_color="#222",
-                      command=lambda: self.controller.show_frame("RegisterScreen"))
+                      command=self.handle_register)
         self.btn_reg.pack(pady=10)
-        
-        self.toggle_register_btn()
+
+    def handle_register(self):
+        if self.role_var.get() == "Admin":
+            self.controller.show_frame("RegisterScreen")
 
     def on_show(self):
         self.lbl_college.configure(text=self.controller.shared_data["college_name"])
-        self.toggle_register_btn()
-
-    def toggle_register_btn(self):
-        role = self.role_var.get()
-        if role == "Faculty":
-            self.btn_reg.configure(state="disabled", text_color="#333333")
-        else:
-            self.btn_reg.configure(state="normal", text_color="gray")
 
     def configure_server_ip(self):
         ModernMessagebox("System Managed", "Server connection is managed centrally via the Cloud.", "info")
@@ -235,26 +244,45 @@ class WelcomeScreen(ctk.CTkFrame):
                 
                 # Role Check
                 if user['role'] != role:
-                    ModernMessagebox("Role Error", f"You are registered as a {user['role']}, not {role}.", "error")
-                    return
+                    # Allow HODs to login using the Faculty option
+                    if not (user['role'] == "HOD" and role == "Faculty"):
+                        ModernMessagebox("Role Error", f"You are registered as a {user['role']}, not {role}.", "error")
+                        return
 
                 # Load memory variables
                 self.controller.shared_data["username"] = user['username']
                 self.controller.shared_data["user_type"] = user['role']
                 self.controller.shared_data["college_name"] = user['college_name']
                 self.controller.shared_data["assigned_branch"] = user.get('assigned_branch')
+                self.controller.shared_data["assigned_department"] = user.get('assigned_department')
+                self.controller.shared_data["is_hod"] = user.get('is_hod', 0)
                 
                 erp_config = data.get('erp_config')
                 if erp_config:
                     self.controller.shared_data["erp_config"] = erp_config
                     self.controller.shared_data["erp_setup_needed"] = False
+                    
+                    # Validate ERP Connection
+                    from logic.db_handler import DBHandler
+                    db = DBHandler(erp_config)
+                    if not db.connected:
+                        self.controller.shared_data["diagnostic_error"] = "Database server unreachable."
+                        self.controller.show_frame("ConnectionDiagnosticsScreen")
+                        return
+                    success, msg = db.validate_tables()
+                    if not success:
+                        self.controller.shared_data["diagnostic_error"] = f"Validation Failed:\\n{msg}"
+                        self.controller.show_frame("ConnectionDiagnosticsScreen")
+                        return
+                    
+                    self.controller.show_frame("DashboardScreen")
                 else:
-                    if user['role'] == "Faculty":
-                        ModernMessagebox("System Locked", "Admin has not configured the ERP database connection yet.", "error")
+                    if user['role'] == "Faculty" or user['role'] == "HOD":
+                        ModernMessagebox("System Locked", "System setup has not yet been completed by the Administrator.", "error")
                         return
                     self.controller.shared_data["erp_setup_needed"] = True
+                    self.controller.show_frame("ERPSetupScreen")
 
-                self.controller.show_frame("DashboardScreen")
                 self.entry_pass.delete(0, 'end')
             else:
                 ModernMessagebox("Login Failed", msg, "error")

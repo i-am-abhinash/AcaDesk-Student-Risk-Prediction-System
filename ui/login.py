@@ -73,8 +73,8 @@ class RegisterScreen(ctk.CTkFrame):
                 self.controller.shared_data["college_name"] = college_val
                 self.controller.shared_data["erp_setup_needed"] = True
                 
-                messagebox.showinfo("Success", f"Node Registered for {college_val}.\nRedirecting to ERP Connection Wizard...")
-                self.controller.show_frame("DashboardScreen")
+                messagebox.showinfo("Success", "Registration Successful.")
+                self.controller.show_frame("ERPSetupScreen")
             else:
                 # This will now display the specific "An Administrator is already registered" message
                 messagebox.showerror("Registration Denied", msg)
