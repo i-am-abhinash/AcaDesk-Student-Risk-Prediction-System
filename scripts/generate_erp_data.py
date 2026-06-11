@@ -212,7 +212,15 @@ def generate_academic_records(cursor, student_ids):
         inter = 0.0 if has_diploma else round(random.uniform(50.0, 98.0), 2)
         diploma = round(random.uniform(50.0, 95.0), 2) if has_diploma else 0.0
         
-        for sem in range(1, random.randint(2, 4) + 1):
+        cursor.execute("SELECT y.year_name FROM students s JOIN academic_years y ON s.year_id = y.id WHERE s.id = %s", (sid,))
+        year_name = cursor.fetchone()[0].lower()
+        
+        if '1' in year_name or 'first' in year_name: num_sem = random.randint(1, 2)
+        elif '2' in year_name or 'second' in year_name: num_sem = random.randint(3, 4)
+        elif '3' in year_name or 'third' in year_name: num_sem = random.randint(5, 6)
+        else: num_sem = random.randint(7, 8)
+        
+        for sem in range(1, num_sem + 1):
             cgpa = round(random.uniform(5.0, 10.0), 2)
             internal = round(random.uniform(50, 100), 2)
             mid = round(random.uniform(50, 100), 2)

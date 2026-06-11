@@ -123,7 +123,12 @@ class DBHandler:
             sql = f"""
                 SELECT {sql_select}
                 FROM {self.map['tbl_student']} s
-                JOIN {self.map['tbl_academic']} a ON s.id = a.{self.map['join_student']}
+                LEFT JOIN (
+                    SELECT * FROM {self.map['tbl_academic']}
+                    WHERE id IN (
+                        SELECT MAX(id) FROM {self.map['tbl_academic']} GROUP BY {self.map['join_student']}
+                    )
+                ) a ON s.id = a.{self.map['join_student']}
                 WHERE s.{self.map['join_branch']} = %s 
                   AND (s.{self.map['year']} = %s OR s.{self.map['year']} = %s OR s.{self.map['year']} = %s)
             """
