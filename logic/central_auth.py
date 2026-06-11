@@ -294,11 +294,17 @@ class CentralAuth:
                     "user": erp['db_user'], "password": decrypt_text(erp['encrypted_pass']),
                     "database": erp['db_name']
                 }
+                # Load mapping
+                for k, v in erp.items():
+                    if k.startswith('tbl_') or k.startswith('col_'):
+                        if v is not None:
+                            config[k] = v
+                            
             return {"user": user, "erp_config": config}, "Success"
         finally:
             conn.close()
 
-    def save_erp_config(self, college, db_type, host, port, db_name, db_user, db_pass):
+    def save_erp_config(self, college, db_type, host, port, db_name, db_user, db_pass, mapping=None):
         conn = self._get_conn()
         if not conn: return False
         try:
@@ -318,6 +324,12 @@ class CentralAuth:
             cursor.execute(sql, (
                 college, db_type, host, port, db_name, db_user, enc_p
             ))
+            
+            if mapping:
+                for k, v in mapping.items():
+                    if k.startswith('tbl_') or k.startswith('col_'):
+                        up_sql = f"UPDATE erp_configs SET {k}=%s WHERE college_name=%s"
+                        cursor.execute(up_sql, (v, college))
 
             conn.commit()
             return True

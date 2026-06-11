@@ -11,232 +11,83 @@ class DBHandler:
         if not self.config: return
 
         # SAFETY NET: Use .get(key, "default_name") to prevent 'none' errors
-        # Initialize map with default names; will be overridden by schema discovery if possible
         self.map = {
-            "tbl_student": "student",
-            "tbl_academic": "academics",
-            "tbl_department": "departments",
-            "join_student": "student_id",
-            "join_branch": "branch_id",
-            "id": "roll_no",
-            "name": "name",
-            "branch_name": "branch_name",
-            "year": "year",
-            "marks": "marks"
+            "tbl_student": self.config.get("tbl_student", "student"),
+            "tbl_academic": self.config.get("tbl_academic", "academics"),
+            "tbl_history": self.config.get("tbl_history", "academic_history"),
+            "tbl_branch": self.config.get("tbl_branch", "branch"),
+            "join_student": self.config.get("col_student_join", "student_id"),
+            "join_branch": self.config.get("col_branch_join", "branch_id"),
+            "col_semester": self.config.get("col_semester", "semester"),
+            "id": self.config.get("col_id", "roll_no"),
+            "name": self.config.get("col_name", "name"),
+            "branch_name": self.config.get("col_branch_name", "branch_name"),
+            "year": self.config.get("col_year", "year"),
+            "att": self.config.get("col_att", "attendance"),
+            "marks": self.config.get("col_marks", "internal_marks"),
+            "cgpa": self.config.get("col_cgpa", "cgpa"),
+            "backlogs": self.config.get("col_backlogs", "backlogs"),
+            "tenth": self.config.get("col_tenth", "tenth_percentage"),
+            "inter": self.config.get("col_inter", "intermediate_percentage"),
+            "diploma": self.config.get("col_diploma", "diploma_percentage"),
+            "lab_perf": self.config.get("col_lab_perf", "lab_performance"),
+            "mid_exam": self.config.get("col_mid_exam", "mid_exam_score"),
+            "cons_abs": self.config.get("col_cons_abs", "consecutive_absences"),
+            "leave_freq": self.config.get("col_leave_freq", "leave_frequency"),
+            "parent_phone": self.config.get("col_parent_phone", "parent_phone"),
+            "parent_email": self.config.get("col_parent_email", "parent_email")
         }
-        # Column synonym definitions for dynamic mapping
-        self.COLUMN_SYNONYMS = {
-            "attendance": ["attendance", "attendance_percentage", "attendance_percent", "attendance_pct", "att"],
-            "backlogs": ["backlog_count", "backlogs", "backlog", "arrears"],
-            "marks": ["internal_marks", "marks", "total_marks", "score", "obtained_marks"],
-            "cgpa": ["cgpa", "cumulative_gpa", "gpa"],
-            "student_id": ["id", "student_id", "registration_no", "roll_no", "reg_no"],
-            "registration_no": ["registration_no", "reg_no", "roll_no", "registration_number"],
-            "name": ["name", "student_name", "full_name"]
-        }
-        # Required concept keys for validation
-        self.REQUIRED_CONCEPTS = {"attendance", "backlogs", "marks", "cgpa", "student_id"}
-
-        # Containers for discovered column names
-        self.student_columns = set()
-        self.academic_columns = set()
-        # Expected logical column keys for diagnostics
-        # Expected keys are now derived from synonyms; no hardcoded expected sets
-        # Connect first, then discover schema using the live cursor
         self.connect()
-        try:
-            self._discover_schema()
-            self._build_alias_map()
-        except Exception as e:
-            pass  # Keep defaults if discovery fails
-
 
     def connect(self):
         try:
             import mysql.connector
-            from mysql.connector import errorcode
             self.conn = mysql.connector.connect(
                 host=self.config.get('host', 'localhost'),
                 user=self.config.get('user', 'root'),
                 password=self.config.get('password', ''),
                 database=self.config.get('database', 'engineering_college'),
-                port=int(self.config.get('port', 3306)),
-                connection_timeout=3
+                port=int(self.config.get('port', 3306))
             )
-            self.cursor = self.conn.cursor(dictionary=True, buffered=True)
+            self.cursor = self.conn.cursor(dictionary=True)
             self.connected = True
-            
-            # Read-Only Validation Check
-            try:
-                self.cursor.execute("SELECT 1")
-                self.cursor.fetchall() # Consume the result completely
-                # We can't safely test INSERT without altering ERP, so we trust the DB user privileges
-                # Ideally, we verify GRANTS here, but checking connection is the first step.
-            except Exception as e:
-                return False, "ERP connection established but Read-Only enforcement validation failed."
-                
-            return True, "Connection Successful"
-        except mysql.connector.Error as err:
-            if err.errno == errorcode.ER_ACCESS_DENIED_ERROR:
-                return False, "Authentication failed.\nInvalid database username or incorrect password."
-            elif err.errno == errorcode.ER_BAD_DB_ERROR:
-                return False, "Specified database does not exist."
-            else:
-                return False, f"Database server unreachable.\nCheck network connectivity.\n{err.msg}"
         except Exception as e:
-            msg = str(e).lower()
-            if "unknown mysql server host" in msg:
-                return False, "Unable to reach database server.\nVerify host address."
-            elif "connection refused" in msg or "port" in msg:
-                return False, "Database server found but specified port is unreachable."
-            return False, f"Network Failure: {e}"
+            print(f"❌ Connection Failed: {e}")
 
-    # Enhanced schema discovery – map tables and collect column info
-    def _discover_schema(self):
-        """Detect ERP schema, update table mappings, and discover column sets.
-        It queries information_schema for tables and columns, then populates
-        self.student_columns and self.academic_columns.
-        """
-        try:
-            # Ensure we have a connection first
-            if not self.conn:
-                self.connect()
-            if not self.conn:
-                return
-            db_name = self.config.get('database')
-            # ---- Table discovery ----
-            self.cursor.execute(
-                "SELECT TABLE_NAME FROM information_schema.tables WHERE TABLE_SCHEMA = %s",
-                (db_name,)
-            )
-            tables = [row['TABLE_NAME'] for row in self.cursor.fetchall()]
-            for tbl in tables:
-                lowered = tbl.lower()
-                if 'student' in lowered:
-                    self.map['tbl_student'] = tbl
-                if 'academic' in lowered:
-                    self.map['tbl_academic'] = tbl
-                if 'branch' in lowered:
-                    self.map['tbl_branch'] = tbl
-                if 'department' in lowered or 'dept' in lowered:
-                    self.map['tbl_department'] = tbl
-            # ---- Column discovery for student table ----
-            student_tbl = self.map.get('tbl_student')
-            if student_tbl:
-                self.cursor.execute(
-                    "SELECT COLUMN_NAME FROM information_schema.columns WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s",
-                    (db_name, student_tbl)
-                )
-                self.student_columns = {row['COLUMN_NAME'] for row in self.cursor.fetchall()}
-                # Update primary key and foreign key mappings based on discovered columns
-                if 'id' in self.student_columns:
-                    self.map['id'] = 'id'
-                if 'department_id' in self.student_columns:
-                    self.map['join_branch'] = 'department_id'
-                if 'year_id' in self.student_columns:
-                    self.map['year'] = 'year_id'
-                # Optionally map name column if different
-                if 'name' in self.student_columns:
-                    self.map['name'] = 'name'
-            # ---- Column discovery for academic table ----
-            academic_tbl = self.map.get('tbl_academic')
-            if academic_tbl:
-                self.cursor.execute(
-                    "SELECT COLUMN_NAME FROM information_schema.columns WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s",
-                    (db_name, academic_tbl)
-                )
-                self.academic_columns = {row['COLUMN_NAME'] for row in self.cursor.fetchall()}
-        except Exception as e:
-            print(f"Schema discovery error: {e}")
+    def close(self):
+        if self.cursor:
+            try: self.cursor.close()
+            except: pass
+        if self.conn:
+            try: self.conn.close()
+            except: pass
+        self.connected = False
+
     def validate_tables(self):
-        """Validate ERP connection and discover tables dynamically.
-        Returns (bool, str) where the message includes discovered table counts.
-        Validation succeeds if the connection is alive and at least one student-related table exists.
-        """
-        if not self.conn:
-            return False, "No connection"
+        if not self.conn or not self.connected:
+            return False, "Not connected to database."
         try:
-            # Retrieve all tables in the configured database
-            self.cursor.execute(
-                "SELECT TABLE_NAME FROM information_schema.tables WHERE TABLE_SCHEMA = %s",
-                (self.config.get('database'),)
-            )
-            tables = [row['TABLE_NAME'] for row in self.cursor.fetchall()]
-            total_tables = len(tables)
-            # Identify categories by name heuristics
-            student_tables = [t for t in tables if 'student' in t.lower()]
-            academic_tables = [t for t in tables if 'academic' in t.lower()]
-            department_tables = [t for t in tables if 'department' in t.lower() or 'dept' in t.lower()]
-            # Build summary
-            summary = (
-                f"Discovered Tables: total={total_tables}, "
-                f"student={len(student_tables)}, academic={len(academic_tables)}, department={len(department_tables)}"
-            )
-            # Validation logic: must have at least one student table and some data
-            if not student_tables:
-                return False, f"{summary} – No student tables found"
-            # Check that the first discovered student table has rows
-            self.cursor.execute(f"SELECT COUNT(*) as c FROM {student_tables[0]}")
-            count = self.cursor.fetchone()['c']
-            if count == 0:
-                return False, f"{summary} – Student table exists but contains no data"
-            return True, summary
+            self.cursor.execute("SHOW TABLES")
+            tables = [r[list(r.keys())[0]].lower() for r in self.cursor.fetchall()]
+            
+            missing = []
+            if self.map['tbl_student'].lower() not in tables: missing.append(self.map['tbl_student'])
+            if self.map['tbl_academic'].lower() not in tables: missing.append(self.map['tbl_academic'])
+            if self.map['tbl_branch'].lower() not in tables: missing.append(self.map['tbl_branch'])
+            
+            if missing:
+                return False, f"Missing configured tables: {', '.join(missing)}"
+            return True, "Valid"
         except Exception as e:
-            return False, f"Validation error: {e}"
-            err_str = str(e).lower()
-            if "unread result found" in err_str:
-                return False, "Internal Validation Query Error: Unread result found. A previous validation query did not consume its results."
-            return False, str(e)
-
-    def _safe_execute(self, sql, params=None):
-        """
-        Failsafe to ensure the ERP Database is strictly Read-Only.
-        Blocks any query attempting to modify data.
-        """
-        forbidden = ['INSERT', 'UPDATE', 'DELETE', 'ALTER', 'DROP', 'TRUNCATE', 'CREATE']
-        query_upper = sql.upper()
-        if any(keyword in query_upper for keyword in forbidden):
-            raise PermissionError("AcaDesk Governance Violation: Attempted a forbidden write operation on the Read-Only ERP Database.")
-        
-        if params:
-            self.cursor.execute(sql, params)
-        else:
-            self.cursor.execute(sql)
-
-    def _build_alias_map(self):
-        """Map logical concept keys to actual column names using discovered columns and synonyms.
-
-        Populates self.map entries for concepts defined in COLUMN_SYNONYMS (e.g., attendance, backlogs, marks, cgpa, student_id).
-        """
-        # Iterate over each concept and its possible synonym names
-        STUDENT_CONCEPTS = {"student_id", "registration_no", "name"}
-        for concept, synonyms in self.COLUMN_SYNONYMS.items():
-            # Choose appropriate column set based on concept type
-            column_set = self.student_columns if concept in STUDENT_CONCEPTS else self.academic_columns
-            for synonym in synonyms:
-                if synonym in column_set:
-                    self.map[concept] = synonym
-                    break
+            return False, f"Error validating tables: {e}"
 
     def get_branch_map(self):
         if not self.conn or not self.connected: return {}
         try:
-            # Discover department table and name column dynamically
-            dept_table = self.map.get('tbl_department')
-            if not dept_table:
-                return {}
-            # Assume department name column is 'name' or contains 'name'
-            self.cursor.execute(
-                "SELECT COLUMN_NAME FROM information_schema.columns WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s",
-                (self.config.get('database'), dept_table)
-            )
-            cols = [row['COLUMN_NAME'] for row in self.cursor.fetchall()]
-            name_col = next((c for c in cols if 'name' in c.lower()), 'name')
-            # Assuming branch_id is the standard link
-            id_col = next((c for c in cols if 'id' in c.lower()), 'id')
-            sql = f"SELECT {id_col}, {name_col} FROM {dept_table}"
-            self._safe_execute(sql)
-            return {str(r[id_col]): str(r[name_col]).upper() for r in self.cursor.fetchall()}
+            # Assumes the branch table's primary key is 'id' and the student table's foreign key is join_branch
+            sql = f"SELECT id, {self.map['branch_name']} FROM {self.map['tbl_branch']}"
+            self.cursor.execute(sql)
+            return {str(r['id']): str(r[self.map['branch_name']]).upper() for r in self.cursor.fetchall()}
         except Exception as e:
             print(f"Branch Map Lookup Error: {e}")
             return {}
@@ -245,254 +96,285 @@ class DBHandler:
         return list(self.get_branch_map().keys())
 
     # Keep your existing get_students and get_all_students...
-    def get_all_students(self):
-        if not self.conn:
-            return []
-        try:
-            select_parts = []
-
-            # --- Branch ID ---
-            join_branch_col = self.map.get('join_branch')
-            if join_branch_col and join_branch_col in self.student_columns:
-                select_parts.append(f"s.{join_branch_col} AS bid")
-
-            # --- Registration Number (resolved by _build_alias_map) ---
-            reg_col = self.map.get('registration_no')
-            if reg_col and reg_col in self.student_columns:
-                select_parts.append(f"s.{reg_col} AS display_reg_no")
-
-            # --- Student Name (resolved by _build_alias_map) ---
-            name_col = self.map.get('name')
-            if name_col and name_col in self.student_columns:
-                select_parts.append(f"s.{name_col} AS display_name")
-
-            # --- Attendance (resolved by _build_alias_map) ---
-            att_col = self.map.get('attendance')
-            if att_col and att_col in self.academic_columns:
-                select_parts.append(f"a.{att_col} AS att")
-
-            # --- Marks (resolved by _build_alias_map) ---
-            marks_col = self.map.get('marks')
-            if marks_col and marks_col in self.academic_columns:
-                select_parts.append(f"a.{marks_col} AS marks")
-
-            # --- Backlogs (resolved by _build_alias_map) ---
-            bkl_col = self.map.get('backlogs')
-            if bkl_col and bkl_col in self.academic_columns:
-                select_parts.append(f"a.{bkl_col} AS bkl")
-
-            if not select_parts:
-                return []
-
-            # Resolve the student_id join column in the academic table
-            stu_id_col = self.map.get('join_student', 'student_id')
-
-            select_clause = ", ".join(select_parts)
-            sql = f"""
-                SELECT {select_clause}
-                FROM {self.map['tbl_student']} s
-                JOIN (
-                    SELECT {stu_id_col}, MAX(semester) AS latest_sem
-                    FROM {self.map['tbl_academic']}
-                    GROUP BY {stu_id_col}
-                ) latest ON s.{self.map['id']} = latest.{stu_id_col}
-                JOIN {self.map['tbl_academic']} a ON a.{stu_id_col} = latest.{stu_id_col} AND a.semester = latest.latest_sem
-            """
-            self._safe_execute(sql)
-            rows = []
-            for r in self.cursor.fetchall():
-                mapped = {
-                    "branch": str(r.get('bid')),
-                    "avg_attendance": float(r.get('att') or 0.0),
-                    "avg_marks": float(r.get('marks') or 0.0),
-                    "backlogs": int(r.get('bkl') or 0),
-                    "display_reg_no": r.get('display_reg_no'),
-                    "display_name": r.get('display_name')
-                }
-                rows.append(mapped)
-            return rows
-        except Exception as e:
-            print(f"All Students fetch error: {e}")
-            return []
-
-
 
     def get_students(self, branch_id, year):
-        if not self.conn:
-            return []
+        if not self.conn: return []
         try:
             year_val = str(year)[0] if "Year" in str(year) else year
+            sql_select = f"s.{self.map['id']} AS sid, s.{self.map['name']} AS sname, s.{self.map['year']} AS syear, a.{self.map['att']} AS satt, a.{self.map['marks']} AS smarks, a.{self.map['backlogs']} AS sbkl"
+            if self.map['tenth']: sql_select += f", s.{self.map['tenth']} AS stenth"
+            if self.map['inter']: sql_select += f", s.{self.map['inter']} AS sinter"
+            if self.map['diploma']: sql_select += f", s.{self.map['diploma']} AS sdiploma"
+            if self.map['lab_perf']: sql_select += f", a.{self.map['lab_perf']} AS slab"
+            if self.map['mid_exam']: sql_select += f", a.{self.map['mid_exam']} AS smid"
+            if self.map['cons_abs']: sql_select += f", a.{self.map['cons_abs']} AS scons_abs"
+            if self.map['leave_freq']: sql_select += f", a.{self.map['leave_freq']} AS sleave_freq"
+            if self.map['parent_phone']: sql_select += f", s.{self.map['parent_phone']} AS sparent_phone"
+            if self.map['parent_email']: sql_select += f", s.{self.map['parent_email']} AS sparent_email"
 
-            # Resolve columns via alias map
-            join_branch_col = self.map.get('join_branch', 'department_id')
-            year_col = self.map.get('year', 'year_id')
-            id_col = self.map.get('id', 'id')
-            stu_id_col = self.map.get('join_student', 'student_id')
-            reg_col = self.map.get('registration_no')
-            name_col = self.map.get('name')
-            att_col = self.map.get('attendance')
-            marks_col = self.map.get('marks')
-            bkl_col = self.map.get('backlogs')
+            # Robust Year Matching
+            numeric_year = 0
+            y_str = str(year_val).lower()
+            if '1' in y_str or 'first' in y_str: numeric_year = 1
+            elif '2' in y_str or 'second' in y_str: numeric_year = 2
+            elif '3' in y_str or 'third' in y_str: numeric_year = 3
+            elif '4' in y_str or 'fourth' in y_str: numeric_year = 4
 
-            select_parts = []
-            if join_branch_col and join_branch_col in self.student_columns:
-                select_parts.append(f"s.{join_branch_col} AS bid")
-            if reg_col and reg_col in self.student_columns:
-                select_parts.append(f"s.{reg_col} AS display_reg_no")
-            if name_col and name_col in self.student_columns:
-                select_parts.append(f"s.{name_col} AS display_name")
-            if att_col and att_col in self.academic_columns:
-                select_parts.append(f"a.{att_col} AS satt")
-            if marks_col and marks_col in self.academic_columns:
-                select_parts.append(f"a.{marks_col} AS smarks")
-            if bkl_col and bkl_col in self.academic_columns:
-                select_parts.append(f"a.{bkl_col} AS sbkl")
-
-            if not select_parts:
-                return []
-
-            select_clause = ", ".join(select_parts)
             sql = f"""
-                SELECT {select_clause}
+                SELECT {sql_select}
                 FROM {self.map['tbl_student']} s
-                JOIN (
-                    SELECT {stu_id_col}, MAX(semester) AS latest_sem
-                    FROM {self.map['tbl_academic']}
-                    GROUP BY {stu_id_col}
-                ) latest ON s.{id_col} = latest.{stu_id_col}
-                JOIN {self.map['tbl_academic']} a ON a.{stu_id_col} = latest.{stu_id_col} AND a.semester = latest.latest_sem
-                WHERE s.{join_branch_col} = %s AND s.{year_col} = %s
+                JOIN {self.map['tbl_academic']} a ON s.id = a.{self.map['join_student']}
+                WHERE s.{self.map['join_branch']} = %s 
+                  AND (s.{self.map['year']} = %s OR s.{self.map['year']} = %s OR s.{self.map['year']} = %s)
             """
-            self._safe_execute(sql, (branch_id, year_val))
-            rows = []
+            
+            with open('debug_filter.txt', 'a', encoding='utf-8') as f:
+                f.write(f"SQL: {sql}\nArgs: ({branch_id}, {year_val}, {numeric_year}, {str(numeric_year)})\n")
+                
+            self.cursor.execute(sql, (branch_id, year_val, numeric_year, str(numeric_year)))
+            
+            results = []
             for r in self.cursor.fetchall():
-                rows.append({
-                    "display_reg_no": r.get('display_reg_no'),
-                    "display_name": r.get('display_name'),
-                    "avg_attendance": float(r.get('satt') or 0.0),
-                    "avg_marks": float(r.get('smarks') or 0.0),
-                    "backlogs": int(r.get('sbkl') or 0)
-                })
-            return rows
+                student_data = {
+                    "id": r['sid'], 
+                    "name": r['sname'], 
+                    "year": str(r['syear']),
+                    "avg_attendance": float(r['satt']) if r['satt'] is not None else 0.0, 
+                    "avg_marks": float(r['smarks']) if r['smarks'] is not None else 0.0, 
+                    "backlogs": int(r['sbkl']) if r['sbkl'] is not None else 0
+                }
+                if 'stenth' in r: student_data['tenth'] = float(r['stenth']) if r['stenth'] is not None else None
+                if 'sinter' in r: student_data['inter'] = float(r['sinter']) if r['sinter'] is not None else None
+                if 'sdiploma' in r: student_data['diploma'] = float(r['sdiploma']) if r['sdiploma'] is not None else None
+                
+                if 'slab' in r: student_data['lab_performance'] = float(r['slab']) if r['slab'] is not None else None
+                if 'smid' in r: student_data['mid_exam_score'] = float(r['smid']) if r['smid'] is not None else None
+                if 'scons_abs' in r: student_data['consecutive_absences'] = int(r['scons_abs']) if r['scons_abs'] is not None else None
+                if 'sleave_freq' in r: student_data['leave_frequency'] = int(r['sleave_freq']) if r['sleave_freq'] is not None else None
+                
+                if 'sparent_phone' in r: student_data['parent_phone'] = r['sparent_phone']
+                if 'sparent_email' in r: student_data['parent_email'] = r['sparent_email']
+                
+                results.append(student_data)
+                
+            return results
         except Exception as e:
+            with open('debug_filter.txt', 'a', encoding='utf-8') as f:
+                f.write(f"Fetch Students Error: {e}\n")
             print(f"Fetch Students Error: {e}")
             return []
 
-
-    def get_students_full(self, branch_id, year):
-        """
-        Fetch ALL discovered academic columns for every student in a branch/year.
-        Used by the AdvancedRiskPredictor to access the complete feature set.
-        Returns a list of raw row dicts with actual ERP column names.
-        """
-        if not self.conn:
-            return []
+    def get_all_students(self):
+        if not self.conn: return []
         try:
-            year_val = str(year)[0] if "Year" in str(year) else year
+            sql_select = f"s.{self.map['join_branch']} AS bid, s.{self.map['year']} AS syear, a.{self.map['att']} AS att, a.{self.map['marks']} AS marks, a.{self.map['backlogs']} AS bkl"
+            if self.map['tenth']: sql_select += f", s.{self.map['tenth']} AS stenth"
+            if self.map['inter']: sql_select += f", s.{self.map['inter']} AS sinter"
+            if self.map['diploma']: sql_select += f", s.{self.map['diploma']} AS sdiploma"
+            if self.map['lab_perf']: sql_select += f", a.{self.map['lab_perf']} AS slab"
+            if self.map['mid_exam']: sql_select += f", a.{self.map['mid_exam']} AS smid"
+            if self.map['cons_abs']: sql_select += f", a.{self.map['cons_abs']} AS scons_abs"
+            if self.map['leave_freq']: sql_select += f", a.{self.map['leave_freq']} AS sleave_freq"
 
-            join_branch_col = self.map.get('join_branch', 'department_id')
-            year_col        = self.map.get('year', 'year_id')
-            id_col          = self.map.get('id', 'id')
-            stu_id_col      = self.map.get('join_student', 'student_id')
-            reg_col         = self.map.get('registration_no')
-            name_col        = self.map.get('name')
-
-            # Identity columns from student table
-            student_select = []
-            if join_branch_col and join_branch_col in self.student_columns:
-                student_select.append(f"s.{join_branch_col}")
-            if reg_col and reg_col in self.student_columns:
-                student_select.append(f"s.{reg_col} AS display_reg_no")
-            if name_col and name_col in self.student_columns:
-                student_select.append(f"s.{name_col} AS display_name")
-
-            # ALL discovered academic columns
-            academic_select = [
-                f"a.{col}" for col in sorted(self.academic_columns)
-                if col not in (stu_id_col, 'semester', 'id')
-            ]
-
-            all_select = student_select + academic_select
-            if not all_select:
-                return []
-
-            select_clause = ", ".join(all_select)
             sql = f"""
-                SELECT {select_clause}
+                SELECT {sql_select}
                 FROM {self.map['tbl_student']} s
-                JOIN (
-                    SELECT {stu_id_col}, MAX(semester) AS latest_sem
-                    FROM {self.map['tbl_academic']}
-                    GROUP BY {stu_id_col}
-                ) latest ON s.{id_col} = latest.{stu_id_col}
-                JOIN {self.map['tbl_academic']} a
-                    ON a.{stu_id_col} = latest.{stu_id_col}
-                    AND a.semester = latest.latest_sem
-                WHERE s.{join_branch_col} = %s AND s.{year_col} = %s
+                JOIN {self.map['tbl_academic']} a ON s.id = a.{self.map['join_student']}
             """
-            self._safe_execute(sql, (branch_id, year_val))
-            return list(self.cursor.fetchall())
-        except Exception:
+            self.cursor.execute(sql)
+            
+            results = []
+            for r in self.cursor.fetchall():
+                sd = {
+                    "branch": str(r['bid']), 
+                    "syear": str(r.get('syear', '')),
+                    "avg_attendance": float(r['att']) if r['att'] is not None else 0.0, 
+                    "avg_marks": float(r['marks']) if r['marks'] is not None else 0.0, 
+                    "backlogs": int(r['bkl']) if r['bkl'] is not None else 0
+                }
+                if 'stenth' in r: sd['tenth'] = float(r['stenth']) if r['stenth'] is not None else 0.0
+                if 'sinter' in r: sd['inter'] = float(r['sinter']) if r['sinter'] is not None else 0.0
+                if 'sdiploma' in r: sd['diploma'] = float(r['sdiploma']) if r['sdiploma'] is not None else 0.0
+                if 'slab' in r: sd['lab_performance'] = float(r['slab']) if r['slab'] is not None else 0.0
+                if 'smid' in r: sd['mid_exam_score'] = float(r['smid']) if r['smid'] is not None else 0.0
+                if 'scons_abs' in r: sd['consecutive_absences'] = int(r['scons_abs']) if r['scons_abs'] is not None else 0
+                if 'sleave_freq' in r: sd['leave_frequency'] = int(r['sleave_freq']) if r['sleave_freq'] is not None else 0
+                results.append(sd)
+            return results
+        except Exception as e: 
+            print(f"Fetch All Students Error: {e}")
             return []
 
-
-class BranchTranslator:
-    # Mapping of full department names to abbreviated UI labels
-    ABBR_MAP = {
-        "Artificial Intelligence and Data Science": "AI_DS",
-        "Artificial Intelligence and Machine Learning": "AI_ML",
-        "Computer Science and Engineering": "CSE",
-        "Cyber Security": "CYBER",
-        "Electronics and Communication Engineering": "ECE",
-        "Electrical and Electronics Engineering": "EEE",
-        "Mechanical Engineering": "MECH",
-        "Civil Engineering": "CIVIL",
-        "Computer Science and Mathematics": "CSM",
-        "Internet of Things": "IOT",
-        "Information Technology": "IT",
-    }
-    def __init__(self, db_handler):
-        self.map = {}
-        if db_handler:
-            self.map = db_handler.get_branch_map()
-    def get_name(self, branch_id):
-        bid_str = str(branch_id).strip()
-        full_name = self.map.get(bid_str, f"Dept {branch_id}")
-        return self.ABBR_MAP.get(full_name, full_name)
-
-    def get_sample_data(self):
-        """Retrieve sample data for preview.
-        Returns a dict with student count, branch count, and up to 3 sample student rows.
-        """
-        if not self.conn:
-            return None
+    def get_student_history(self, student_id):
+        if not self.conn: return []
+        
+        # Try fetching real data first
         try:
-            # Student count
-            self.cursor.execute(f"SELECT COUNT(*) as c FROM {self.map['tbl_student']}")
-            student_count = self.cursor.fetchone()['c']
-            # Department (branch) count using dynamic department table
-            dept_table = self.map.get('tbl_department')
-            if not dept_table:
-                branch_count = 0
-            else:
-                self.cursor.execute(f"SELECT COUNT(*) as c FROM {dept_table}")
-                branch_count = self.cursor.fetchone()['c']
-            # Sample students (first 3) – select ID and name if available
-            select_cols = []
-            if self.map.get('student_id') in self.student_columns:
-                select_cols.append(self.map['student_id'])
-            if self.map.get('name') in self.student_columns:
-                select_cols.append(self.map['name'])
-            if not select_cols:
-                return None
-            cols_clause = ", ".join(select_cols)
-            self.cursor.execute(f"SELECT {cols_clause} FROM {self.map['tbl_student']} LIMIT 3")
-            samples = self.cursor.fetchall()
-            return {
-                "student_count": student_count,
-                "branch_count": branch_count,
-                "samples": samples
-            }
+            sql = f"""
+                SELECT semester,
+                       cgpa,
+                       attendance_percentage AS att,
+                       backlog_count AS bkl
+                FROM academic_records
+                WHERE student_id = %s
+                ORDER BY semester ASC
+            """
+            self.cursor.execute(sql, (student_id,))
+            records = self.cursor.fetchall()
+            if records:
+                return [{"semester": int(r['semester']), "cgpa": float(r['cgpa']),
+                         "attendance": float(r['att']), "backlogs": int(r['bkl'])} for r in records]
         except Exception as e:
-            print(f"Sample Data Error: {e}")
+            # Silently ignore the error since we expect the table to be missing in some ERPs
+            print(f"Error fetching academic_records: {e}")
+            pass
+            
+        return []
+
+    def get_interventions(self, student_id):
+        if not self.conn: return []
+        try:
+            sql = "SELECT id, recommendation_text, priority, status, reason, date_created FROM interventions WHERE student_id = %s ORDER BY priority ASC, date_created DESC"
+            self.cursor.execute(sql, (student_id,))
+            return self.cursor.fetchall()
+        except Exception as e:
+            print(f"Error fetching interventions: {e}")
+            return []
+
+    def save_intervention(self, student_id, text, priority, status, reason):
+        if not self.conn: return False
+        try:
+            sql = "INSERT INTO interventions (student_id, recommendation_text, priority, status, reason) VALUES (%s, %s, %s, %s, %s)"
+            self.cursor.execute(sql, (student_id, text, priority, status, reason))
+            self.conn.commit()
+            return self.cursor.lastrowid
+        except Exception as e:
+            print(f"Error saving intervention: {e}")
             return None
+
+    def update_intervention_status(self, intervention_id, status):
+        if not self.conn: return False
+        try:
+            sql = "UPDATE interventions SET status = %s WHERE id = %s"
+            self.cursor.execute(sql, (status, intervention_id))
+            self.conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error updating intervention status: {e}")
+            return False
+    def save_monthly_snapshot(self, branch_id, month_str, health_score, att_avg, cgpa_avg, risk_dist):
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS monthly_trends (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    branch_id VARCHAR(50),
+                    snapshot_month VARCHAR(20),
+                    health_score FLOAT,
+                    att_avg FLOAT,
+                    cgpa_avg FLOAT,
+                    high_risk INT,
+                    med_risk INT,
+                    low_risk INT,
+                    UNIQUE KEY unique_snapshot (branch_id, snapshot_month)
+                )
+            """)
+            self.conn.commit()
+            
+            cursor.execute("""
+                INSERT INTO monthly_trends (branch_id, snapshot_month, health_score, att_avg, cgpa_avg, high_risk, med_risk, low_risk)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE 
+                    health_score=VALUES(health_score), 
+                    att_avg=VALUES(att_avg), 
+                    cgpa_avg=VALUES(cgpa_avg),
+                    high_risk=VALUES(high_risk),
+                    med_risk=VALUES(med_risk),
+                    low_risk=VALUES(low_risk)
+            """, (branch_id, month_str, health_score, att_avg, cgpa_avg, risk_dist.get('High', 0), risk_dist.get('Medium', 0), risk_dist.get('Low', 0)))
+            self.conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error saving monthly snapshot: {e}")
+            return False
+            
+    def get_monthly_trends(self, branch_id=None):
+        try:
+            cursor = self.conn.cursor(dictionary=True)
+            if branch_id:
+                cursor.execute("SELECT * FROM monthly_trends WHERE branch_id=%s ORDER BY snapshot_month ASC", (branch_id,))
+            else:
+                cursor.execute("SELECT * FROM monthly_trends ORDER BY snapshot_month ASC")
+            return cursor.fetchall()
+        except:
+            return []
+
+    def initialize_notes_table(self):
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS faculty_notes (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    student_id VARCHAR(50),
+                    faculty_username VARCHAR(100),
+                    department VARCHAR(50),
+                    note_text TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    status VARCHAR(20) DEFAULT 'Active'
+                )
+            """)
+            self.conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error initializing faculty_notes: {e}")
+            return False
+
+    def create_note(self, student_id, faculty_username, department, note_text):
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                INSERT INTO faculty_notes (student_id, faculty_username, department, note_text)
+                VALUES (%s, %s, %s, %s)
+            """, (student_id, faculty_username, department, note_text))
+            self.conn.commit()
+            return True, "Note Saved Successfully"
+        except Exception as e:
+            return False, str(e)
+
+    def update_note(self, note_id, note_text):
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("UPDATE faculty_notes SET note_text=%s WHERE id=%s", (note_text, note_id))
+            self.conn.commit()
+            return True, "Note Updated"
+        except Exception as e:
+            return False, str(e)
+
+    def delete_note(self, note_id):
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("DELETE FROM faculty_notes WHERE id=%s", (note_id,))
+            self.conn.commit()
+            return True, "Note Deleted"
+        except Exception as e:
+            return False, str(e)
+
+    def get_student_notes(self, student_id):
+        try:
+            cursor = self.conn.cursor(dictionary=True)
+            cursor.execute("SELECT * FROM faculty_notes WHERE student_id=%s ORDER BY created_at DESC", (student_id,))
+            return cursor.fetchall()
+        except:
+            return []
+            
+    def get_all_notes_filtered(self, department=None):
+        try:
+            cursor = self.conn.cursor(dictionary=True)
+            if department:
+                cursor.execute("SELECT * FROM faculty_notes WHERE department=%s ORDER BY created_at DESC", (department,))
+            else:
+                cursor.execute("SELECT * FROM faculty_notes ORDER BY created_at DESC")
+            return cursor.fetchall()
+        except:
+            return []

@@ -1,0 +1,3 @@
+All students count: 7458
+Branch map: {'COMPUTER SCIENCE': '1', 'ELECTRICAL ENGINEERING': '2', 'MECHANICAL ENGINEERING': '3', 'CIVIL ENGINEERING': '4', 'CHEMICAL ENGINEERING': '5', 'INFORMATION TECHNOLOGY': '6', 'ELECTRONICS & COMMUNICATION': '7', 'BIOTECHNOLOGY': '8', 'AEROSPACE ENGINEERING': '9', 'MATERIALS SCIENCE': '10'}
+First student sample: {'branch': '1', 'syear': '4', 'avg_attendance': 86.26, 'avg_marks': 71.82, 'backlogs': 0, 'lab_performance': 60.82, 'mid_exam_score': 66.92}

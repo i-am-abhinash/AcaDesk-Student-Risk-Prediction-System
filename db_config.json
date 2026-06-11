@@ -1,0 +1,22 @@
+    "central": {
+        "host": "127.0.0.1",
+        "user": "root",
+        "password": "Abhinash@19",
+        "database": "acadesk_central",
+        "port": 3306
+    },
+    "analytics": {
+        "host": "127.0.0.1",
+        "user": "root",
+        "password": "Abhinash@19",
+        "database": "acadesk_analytics",
+        "port": 3306
+    },
+    "erp": {
+        "host": "127.0.0.1",
+        "port": "3306",
+        "database": "engineering_college",
+        "user": "root",
+        "password": "Abhinash@19"
+    }
+}
