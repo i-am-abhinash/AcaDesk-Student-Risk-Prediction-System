@@ -1,3 +1,3 @@
 All students count: 125
-Branch map: {'CSE': '1'}
-First student sample: {'id': 'REG00001', 'display_reg_no': 'REG00001', 'registration_no': 'REG00001', 'branch': '1', 'syear': '2', 'year': '2', 'avg_attendance': 95.6, 'avg_marks': 72.45, 'backlogs': 0, 'tenth': 0.0, 'inter': 0.0, 'diploma': 0.0, 'lab_performance': 96.11, 'mid_exam_score': 97.13, 'consecutive_absences': 0, 'leave_frequency': 0, 'cgpa': 7.62, 'assignment_marks': 66.1}
+Branch map: {'AIML': '8'}
+First student sample: {'id': 'REG00876', 'display_reg_no': 'REG00876', 'registration_no': 'REG00876', 'branch': '8', 'syear': '4', 'year': '4', 'avg_attendance': 75.3, 'avg_marks': 68.45, 'backlogs': 0, 'tenth': 0.0, 'inter': 0.0, 'diploma': 0.0, 'lab_performance': 67.7, 'mid_exam_score': 67.26, 'consecutive_absences': 0, 'leave_frequency': 0, 'cgpa': 9.68, 'assignment_marks': 84.99, 'email': 'deepak.sharma@college.edu'}

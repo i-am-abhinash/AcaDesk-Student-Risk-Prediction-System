@@ -51,7 +51,15 @@ class OverviewPanel(ctk.CTkFrame):
         # Clean up old KPIs and charts
         for w in self.kpi_frame.winfo_children(): w.destroy()
         for w in self.visual_frame.winfo_children(): w.destroy()
-        self.lbl_insight.configure(text="Crunching data across all departments... Please wait.")
+        
+        user_type = self.controller.shared_data.get("user_type")
+        if user_type == "HOD":
+            self.lbl_title.configure(text="🏛️ Department Risk Intelligence")
+            self.lbl_insight.configure(text="Crunching department data... Please wait.")
+        else:
+            self.lbl_title.configure(text="🏛️ Institutional Risk Intelligence")
+            self.lbl_insight.configure(text="Crunching data across all departments... Please wait.")
+            
         self.update_idletasks()
         
         try:
@@ -80,7 +88,7 @@ class OverviewPanel(ctk.CTkFrame):
             user_type = self.controller.shared_data.get("user_type")
             target_branch = None
             if user_type == "HOD":
-                target_branch = self.controller.shared_data.get("assigned_branch")
+                target_branch = self.controller.shared_data.get("assigned_department")
                 self.lbl_insight.configure(text="Crunching department data... Please wait.")
             
             # Run the heavy analytics computation in a background thread
@@ -133,7 +141,7 @@ class OverviewPanel(ctk.CTkFrame):
             print("_on_analysis_complete: getting monthly trends")
             dash = self.master
             analytics_panel = dash.analytics
-            target_branch = self.controller.shared_data.get("assigned_branch") if user_type == "HOD" else None
+            target_branch = self.controller.shared_data.get("assigned_department") if user_type == "HOD" else None
             bid = target_branch if target_branch else "ALL"
             
             trends = analytics_panel.db.get_monthly_trends(bid)
@@ -227,7 +235,7 @@ class OverviewPanel(ctk.CTkFrame):
             dash = self.master
             analytics_panel = dash.analytics
             user_type = self.controller.shared_data.get("user_type")
-            target_branch = self.controller.shared_data.get("assigned_branch") if user_type == "HOD" else None
+            target_branch = self.controller.shared_data.get("assigned_department") if user_type == "HOD" else None
             bid = target_branch if target_branch else "ALL"
             
             import datetime

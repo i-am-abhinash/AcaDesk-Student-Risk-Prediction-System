@@ -114,6 +114,7 @@ class DBHandler:
             sql_select += f", a.{self.map['cgpa']} AS scgpa, a.{self.map['assign_marks']} AS sassign"
             if self.map['parent_phone']: sql_select += f", s.{self.map['parent_phone']} AS sparent_phone"
             if self.map['parent_email']: sql_select += f", s.{self.map['parent_email']} AS sparent_email"
+            if self.map.get('email'): sql_select += f", s.{self.map['email']} AS semail"
 
             # Robust Year Matching
             numeric_year = 0
@@ -164,6 +165,7 @@ class DBHandler:
                 
                 if 'sparent_phone' in r: student_data['parent_phone'] = r['sparent_phone']
                 if 'sparent_email' in r: student_data['parent_email'] = r['sparent_email']
+                if 'semail' in r: student_data['email'] = r['semail']
                 
                 results.append(student_data)
                 

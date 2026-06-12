@@ -860,7 +860,7 @@ class AnalyticsPanel(ctk.CTkFrame):
                 to_emails=emails_to_send,
                 student_name=data.get("display_name", data.get("name", "Student")),
                 student_id=data.get("registration_no", data.get("id", "Unknown")),
-                college_name=self.shared_data.get("college_name", "Your College"),
+                college_name=self.controller.shared_data.get("college_name", "Your College"),
                 risk_level=report.get("level", "Unknown"),
                 dominant_factor=report.get("dominant", "Multiple Factors")
             )

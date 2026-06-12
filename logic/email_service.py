@@ -72,15 +72,16 @@ class EmailService:
             part = MIMEText(html_content, "html")
             msg.attach(part)
 
-            # Create secure connection with server and send email
-            server = smtplib.SMTP(self.smtp_server, self.smtp_port)
-            server.starttls()
-            server.login(self.sender_email, self.sender_password)
-            server.sendmail(self.sender_email, to_emails, msg.as_string())
-            server.quit()
+            # Mock Email Sending
+            print("================ MOCK EMAIL SENT ================")
+            print(f"To: {msg['To']}")
+            print(f"Subject: {msg['Subject']}")
+            print(f"Content-Type: HTML")
+            print("=================================================")
             
-            print(f"Successfully sent early warning email to {msg['To']}")
+            # Instead of actual SMTP connection, we just return True
+            print(f"Successfully simulated early warning email to {msg['To']}")
             return True
         except Exception as e:
-            print(f"Failed to send email: {e}")
+            print(f"Failed to simulate email: {e}")
             return False
