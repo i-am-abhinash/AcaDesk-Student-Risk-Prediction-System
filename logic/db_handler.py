@@ -34,8 +34,10 @@ class DBHandler:
             "mid_exam": self.config.get("col_mid_exam", "mid_exam_score"),
             "cons_abs": self.config.get("col_cons_abs", "consecutive_absences"),
             "leave_freq": self.config.get("col_leave_freq", "leave_frequency"),
+            "assign_marks": self.config.get("col_assign_marks", "assignment_marks"),
             "parent_phone": self.config.get("col_parent_phone", "parent_phone"),
-            "parent_email": self.config.get("col_parent_email", "parent_email")
+            "parent_email": self.config.get("col_p_email"),
+            "email": self.config.get("col_email")
         }
         self.connect()
 
@@ -109,6 +111,7 @@ class DBHandler:
             if self.map['mid_exam']: sql_select += f", a.{self.map['mid_exam']} AS smid"
             if self.map['cons_abs']: sql_select += f", a.{self.map['cons_abs']} AS scons_abs"
             if self.map['leave_freq']: sql_select += f", a.{self.map['leave_freq']} AS sleave_freq"
+            sql_select += f", a.{self.map['cgpa']} AS scgpa, a.{self.map['assign_marks']} AS sassign"
             if self.map['parent_phone']: sql_select += f", s.{self.map['parent_phone']} AS sparent_phone"
             if self.map['parent_email']: sql_select += f", s.{self.map['parent_email']} AS sparent_email"
 
@@ -156,6 +159,8 @@ class DBHandler:
                 if 'smid' in r: student_data['mid_exam_score'] = float(r['smid']) if r['smid'] is not None else None
                 if 'scons_abs' in r: student_data['consecutive_absences'] = int(r['scons_abs']) if r['scons_abs'] is not None else None
                 if 'sleave_freq' in r: student_data['leave_frequency'] = int(r['sleave_freq']) if r['sleave_freq'] is not None else None
+                if 'scgpa' in r: student_data['cgpa'] = float(r['scgpa']) if r['scgpa'] is not None else None
+                if 'sassign' in r: student_data['assignment_marks'] = float(r['sassign']) if r['sassign'] is not None else None
                 
                 if 'sparent_phone' in r: student_data['parent_phone'] = r['sparent_phone']
                 if 'sparent_email' in r: student_data['parent_email'] = r['sparent_email']
@@ -172,7 +177,7 @@ class DBHandler:
     def get_all_students(self):
         if not self.conn: return []
         try:
-            sql_select = f"s.{self.map['join_branch']} AS bid, s.{self.map['year']} AS syear, a.{self.map['att']} AS att, a.{self.map['marks']} AS marks, a.{self.map['backlogs']} AS bkl"
+            sql_select = f"s.{self.map['id']} AS sid, s.{self.map['join_branch']} AS bid, s.{self.map['year']} AS syear, a.{self.map['att']} AS att, a.{self.map['marks']} AS marks, a.{self.map['backlogs']} AS bkl"
             if self.map['tenth']: sql_select += f", s.{self.map['tenth']} AS stenth"
             if self.map['inter']: sql_select += f", s.{self.map['inter']} AS sinter"
             if self.map['diploma']: sql_select += f", s.{self.map['diploma']} AS sdiploma"
@@ -180,34 +185,92 @@ class DBHandler:
             if self.map['mid_exam']: sql_select += f", a.{self.map['mid_exam']} AS smid"
             if self.map['cons_abs']: sql_select += f", a.{self.map['cons_abs']} AS scons_abs"
             if self.map['leave_freq']: sql_select += f", a.{self.map['leave_freq']} AS sleave_freq"
+            sql_select += f", a.{self.map['cgpa']} AS scgpa, a.{self.map['assign_marks']} AS sassign"
+            if self.map['email']: sql_select += f", s.{self.map['email']} AS semail"
+            if self.map['parent_email']: sql_select += f", s.{self.map['parent_email']} AS sparent_email"
 
             sql = f"""
                 SELECT {sql_select}
                 FROM {self.map['tbl_student']} s
-                JOIN {self.map['tbl_academic']} a ON s.id = a.{self.map['join_student']}
+                LEFT JOIN (
+                    SELECT * FROM {self.map['tbl_academic']}
+                    WHERE id IN (
+                        SELECT MAX(id) FROM {self.map['tbl_academic']} GROUP BY {self.map['join_student']}
+                    )
+                ) a ON s.id = a.{self.map['join_student']}
             """
             self.cursor.execute(sql)
             
             results = []
             for r in self.cursor.fetchall():
                 sd = {
+                    "id": r.get('sid'),
+                    "display_reg_no": r.get('sid'),
+                    "registration_no": r.get('sid'),
                     "branch": str(r['bid']), 
                     "syear": str(r.get('syear', '')),
+                    "year": str(r.get('syear', '')),
                     "avg_attendance": float(r['att']) if r['att'] is not None else 0.0, 
                     "avg_marks": float(r['marks']) if r['marks'] is not None else 0.0, 
-                    "backlogs": int(r['bkl']) if r['bkl'] is not None else 0
+                    "backlogs": int(r['bkl']) if r['bkl'] is not None else 0,
+                    "tenth": float(r['stenth']) if r.get('stenth') is not None else 0.0,
+                    "inter": float(r['sinter']) if r.get('sinter') is not None else 0.0,
+                    "diploma": float(r['sdiploma']) if r.get('sdiploma') is not None else 0.0,
+                    "lab_performance": float(r['slab']) if r.get('slab') is not None else 0.0,
+                    "mid_exam_score": float(r['smid']) if r.get('smid') is not None else 0.0,
+                    "consecutive_absences": int(r['scons_abs']) if r.get('scons_abs') is not None else 0,
+                    "leave_frequency": int(r['sleave_freq']) if r.get('sleave_freq') is not None else 0,
+                    "cgpa": float(r['scgpa']) if r.get('scgpa') is not None else 0.0,
+                    "assignment_marks": float(r['sassign']) if r.get('sassign') is not None else 0.0
                 }
-                if 'stenth' in r: sd['tenth'] = float(r['stenth']) if r['stenth'] is not None else 0.0
-                if 'sinter' in r: sd['inter'] = float(r['sinter']) if r['sinter'] is not None else 0.0
-                if 'sdiploma' in r: sd['diploma'] = float(r['sdiploma']) if r['sdiploma'] is not None else 0.0
-                if 'slab' in r: sd['lab_performance'] = float(r['slab']) if r['slab'] is not None else 0.0
-                if 'smid' in r: sd['mid_exam_score'] = float(r['smid']) if r['smid'] is not None else 0.0
-                if 'scons_abs' in r: sd['consecutive_absences'] = int(r['scons_abs']) if r['scons_abs'] is not None else 0
-                if 'sleave_freq' in r: sd['leave_frequency'] = int(r['sleave_freq']) if r['sleave_freq'] is not None else 0
+                if 'semail' in r: sd['email'] = r['semail']
+                if 'sparent_email' in r: sd['parent_email'] = r['sparent_email']
                 results.append(sd)
             return results
         except Exception as e: 
             print(f"Fetch All Students Error: {e}")
+            return []
+
+    def get_training_data(self):
+        if not self.conn: return []
+        try:
+            sql_select = f"a.{self.map['att']} AS att, a.{self.map['marks']} AS marks, a.{self.map['backlogs']} AS bkl"
+            if self.map['tenth']: sql_select += f", s.{self.map['tenth']} AS stenth"
+            if self.map['inter']: sql_select += f", s.{self.map['inter']} AS sinter"
+            if self.map['diploma']: sql_select += f", s.{self.map['diploma']} AS sdiploma"
+            if self.map['lab_perf']: sql_select += f", a.{self.map['lab_perf']} AS slab"
+            if self.map['mid_exam']: sql_select += f", a.{self.map['mid_exam']} AS smid"
+            if self.map['cons_abs']: sql_select += f", a.{self.map['cons_abs']} AS scons_abs"
+            if self.map['leave_freq']: sql_select += f", a.{self.map['leave_freq']} AS sleave_freq"
+            sql_select += f", a.{self.map['cgpa']} AS scgpa, a.{self.map['assign_marks']} AS sassign"
+
+            sql = f"""
+                SELECT {sql_select}
+                FROM {self.map['tbl_academic']} a
+                JOIN {self.map['tbl_student']} s ON s.id = a.{self.map['join_student']}
+            """
+            self.cursor.execute(sql)
+            
+            results = []
+            for r in self.cursor.fetchall():
+                sd = {
+                    "avg_attendance": float(r['att']) if r['att'] is not None else 0.0, 
+                    "avg_marks": float(r['marks']) if r['marks'] is not None else 0.0, 
+                    "backlogs": int(r['bkl']) if r['bkl'] is not None else 0,
+                    "tenth": float(r['stenth']) if r.get('stenth') is not None else 0.0,
+                    "inter": float(r['sinter']) if r.get('sinter') is not None else 0.0,
+                    "diploma": float(r['sdiploma']) if r.get('sdiploma') is not None else 0.0,
+                    "lab_performance": float(r['slab']) if r.get('slab') is not None else 0.0,
+                    "mid_exam_score": float(r['smid']) if r.get('smid') is not None else 0.0,
+                    "consecutive_absences": int(r['scons_abs']) if r.get('scons_abs') is not None else 0,
+                    "leave_frequency": int(r['sleave_freq']) if r.get('sleave_freq') is not None else 0,
+                    "cgpa": float(r['scgpa']) if r.get('scgpa') is not None else 0.0,
+                    "assignment_marks": float(r['sassign']) if r.get('sassign') is not None else 0.0
+                }
+                results.append(sd)
+            return results
+        except Exception as e: 
+            print(f"Fetch Training Data Error: {e}")
             return []
 
     def get_student_history(self, student_id):
@@ -216,13 +279,14 @@ class DBHandler:
         # Try fetching real data first
         try:
             sql = f"""
-                SELECT semester,
-                       cgpa,
-                       attendance_percentage AS att,
-                       backlog_count AS bkl
-                FROM academic_records
-                WHERE student_id = %s
-                ORDER BY semester ASC
+                SELECT a.semester,
+                       a.cgpa,
+                       a.attendance_percentage AS att,
+                       a.backlog_count AS bkl
+                FROM {self.map['tbl_academic']} a
+                JOIN {self.map['tbl_student']} s ON a.{self.map['join_student']} = s.id
+                WHERE s.{self.map['id']} = %s
+                ORDER BY a.semester ASC
             """
             self.cursor.execute(sql, (student_id,))
             records = self.cursor.fetchall()

@@ -82,6 +82,29 @@ class CentralAuth:
                 col_marks VARCHAR(100),
                 col_backlogs VARCHAR(100)
             )""")
+            
+            cursor.execute("""CREATE TABLE IF NOT EXISTS interventions (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                college_name VARCHAR(150),
+                student_id VARCHAR(100),
+                faculty_username VARCHAR(100),
+                risk_level VARCHAR(50),
+                dominant_factor VARCHAR(100),
+                recommended_action VARCHAR(200),
+                priority INT,
+                status VARCHAR(50) DEFAULT 'Planned',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""")
+            
+            cursor.execute("""CREATE TABLE IF NOT EXISTS email_logs (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                college_name VARCHAR(150),
+                student_id VARCHAR(100),
+                alert_type VARCHAR(100),
+                semester VARCHAR(50),
+                sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""")
+            
             conn.commit()
             return True
         except Exception as e:
@@ -335,6 +358,35 @@ class CentralAuth:
             return True
         except Exception as e:
             print("SAVE ERP CONFIG ERROR:", e)
+            return False
+        finally:
+            conn.close()
+
+    def check_email_sent(self, college_name, student_id, alert_type, semester):
+        conn = self._get_conn()
+        if not conn: return False
+        try:
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SELECT id FROM email_logs WHERE college_name=%s AND student_id=%s AND alert_type=%s AND semester=%s",
+                           (college_name, student_id, alert_type, semester))
+            return cursor.fetchone() is not None
+        except Exception as e:
+            print("check_email_sent error:", e)
+            return False
+        finally:
+            conn.close()
+
+    def log_email_sent(self, college_name, student_id, alert_type, semester):
+        conn = self._get_conn()
+        if not conn: return False
+        try:
+            cursor = conn.cursor()
+            cursor.execute("INSERT INTO email_logs (college_name, student_id, alert_type, semester) VALUES (%s, %s, %s, %s)",
+                           (college_name, student_id, alert_type, semester))
+            conn.commit()
+            return True
+        except Exception as e:
+            print("log_email_sent error:", e)
             return False
         finally:
             conn.close()

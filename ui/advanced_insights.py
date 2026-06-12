@@ -60,30 +60,35 @@ class AdvancedInsightsPanel(ctk.CTkFrame):
             else:
                 self.model_features = ['attendance', 'marks', 'backlogs'] # Fallback
                 
-            # Generate synthetic validation set based on expected features
-            n_samples = 1000
-            np.random.seed(99)
-            X_dict = {}
-            for f in self.model_features:
-                if 'att' in f: X_dict[f] = np.random.randint(40, 100, n_samples)
-                elif 'mark' in f: X_dict[f] = np.random.randint(20, 100, n_samples)
-                elif 'backlog' in f: X_dict[f] = np.random.choice([0, 1, 2, 3, 4], n_samples, p=[0.6, 0.2, 0.1, 0.05, 0.05])
-                else: X_dict[f] = np.random.randint(0, 100, n_samples)
+            # Fetch real evaluation data from DB
+            import sys
+            sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+            from logic.db_handler import DBHandler
             
-            X_test = pd.DataFrame(X_dict)
+            erp_conf = self.controller.shared_data.get("erp_config")
+            db = DBHandler(erp_conf) if erp_conf else None
             
-            # Ground truth generation (following train_model logic)
-            y_true = []
-            for i in range(n_samples):
-                att = X_dict.get('attendance', X_dict.get('avg_attendance', 70))[i]
-                mrk = X_dict.get('marks', X_dict.get('avg_marks', 60))[i]
-                bkl = X_dict.get('backlogs', 0)[i]
+            if db and db.connected:
+                raw_data = db.get_training_data()
+                db.close()
+                df = pd.DataFrame(raw_data)
                 
-                if bkl > 2 or att < 60: y_true.append("High")
-                elif bkl > 0 or att < 75 or mrk < 45: y_true.append("Medium")
-                else: y_true.append("Low")
+                # Ground truth generation (following train_model logic exactly)
+                df['y_true'] = np.where(
+                    (df['avg_attendance'] < 65) | (df['backlogs'] >= 3) | (df['cgpa'] < 5.0) | (df['consecutive_absences'] >= 5),
+                    'High',
+                    np.where(
+                        (df['avg_attendance'] < 75) | (df['backlogs'] >= 1) | (df['cgpa'] < 6.5) | (df['consecutive_absences'] >= 3) | (df['avg_marks'] < 50),
+                        'Medium',
+                        'Low'
+                    )
+                )
                 
-            y_true = np.array(y_true)
+                y_true = df['y_true'].values
+                X_test = df[self.model_features]
+            else:
+                self.after(0, self._show_error, "Database connection required for evaluation.")
+                return
             
             # Predictions
             y_pred = self.model.predict(X_test)

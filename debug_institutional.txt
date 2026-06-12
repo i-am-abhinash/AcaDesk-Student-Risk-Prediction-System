@@ -1,3 +1,3 @@
-All students count: 746
-Branch map: {'COMPUTER SCIENCE': '1'}
-First student sample: {'branch': '1', 'syear': '4', 'avg_attendance': 86.26, 'avg_marks': 71.82, 'backlogs': 0, 'lab_performance': 60.82, 'mid_exam_score': 66.92}
+All students count: 125
+Branch map: {'CSE': '1'}
+First student sample: {'id': 'REG00001', 'display_reg_no': 'REG00001', 'registration_no': 'REG00001', 'branch': '1', 'syear': '2', 'year': '2', 'avg_attendance': 95.6, 'avg_marks': 72.45, 'backlogs': 0, 'tenth': 0.0, 'inter': 0.0, 'diploma': 0.0, 'lab_performance': 96.11, 'mid_exam_score': 97.13, 'consecutive_absences': 0, 'leave_frequency': 0, 'cgpa': 7.62, 'assignment_marks': 66.1}

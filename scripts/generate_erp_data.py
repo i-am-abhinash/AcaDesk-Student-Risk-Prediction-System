@@ -10,21 +10,19 @@ DB_NAME = "engineering_college"
 
 # Schema definitions
 DEPARTMENTS = [
-    "Computer Science",
-    "Electrical Engineering",
-    "Mechanical Engineering",
-    "Civil Engineering",
-    "Chemical Engineering",
-    "Information Technology",
-    "Electronics & Communication",
-    "Biotechnology",
-    "Aerospace Engineering",
-    "Materials Science",
+    "CSE",
+    "ECE",
+    "MECH",
+    "CIVIL",
+    "EEE",
+    "IT",
+    "AIDS",
+    "AIML"
 ]
 
 YEARS = ["First Year", "Second Year", "Third Year", "Fourth Year"]
 
-NUM_STUDENTS = 200
+NUM_STUDENTS = 1000
 
 def random_name():
     first = random.choice(["Amit", "Rohit", "Sneha", "Priya", "Kiran", "Anita", "Deepak", "Neha", "Vijay", "Anjali"])
@@ -212,7 +210,7 @@ def generate_academic_records(cursor, student_ids):
         inter = 0.0 if has_diploma else round(random.uniform(50.0, 98.0), 2)
         diploma = round(random.uniform(50.0, 95.0), 2) if has_diploma else 0.0
         
-        cursor.execute("SELECT y.year_name FROM students s JOIN academic_years y ON s.year_id = y.id WHERE s.id = %s", (sid,))
+        cursor.execute("SELECT y.name FROM students s JOIN years y ON s.year_id = y.id WHERE s.id = %s", (sid,))
         year_name = cursor.fetchone()[0].lower()
         
         if '1' in year_name or 'first' in year_name: num_sem = random.randint(1, 2)
@@ -221,15 +219,26 @@ def generate_academic_records(cursor, student_ids):
         else: num_sem = random.randint(7, 8)
         
         for sem in range(1, num_sem + 1):
-            cgpa = round(random.uniform(5.0, 10.0), 2)
+            cgpa = random.choices([
+                round(random.uniform(7.5, 10.0), 2),
+                round(random.uniform(6.0, 7.5), 2),
+                round(random.uniform(4.0, 6.0), 2)
+            ], weights=[70, 20, 10])[0]
+            
             internal = round(random.uniform(50, 100), 2)
             mid = round(random.uniform(50, 100), 2)
             lab = round(random.uniform(50, 100), 2)
             assign = round(random.uniform(50, 100), 2)
-            attendance = round(random.uniform(60, 100), 2)
-            backlogs = random.randint(0, 3)
-            cons_abs = random.randint(0, 5)
-            leave_freq = random.randint(0, 10)
+            
+            attendance = random.choices([
+                round(random.uniform(80, 100), 2),
+                round(random.uniform(65, 80), 2),
+                round(random.uniform(40, 65), 2)
+            ], weights=[70, 20, 10])[0]
+            
+            backlogs = random.choices([0, 1, 2, 3], weights=[70, 15, 10, 5])[0]
+            cons_abs = random.choices([0, 1, 2, 3, 4, 5], weights=[60, 20, 10, 5, 3, 2])[0]
+            leave_freq = random.choices([0, 1, 2, 3, 4, 5], weights=[50, 20, 15, 10, 3, 2])[0]
             cursor.execute(
                 """
                 INSERT INTO academic_records (student_id, semester, cgpa, internal_marks, mid_exam_score, lab_performance, assignment_marks, attendance_percentage, backlog_count, tenth_percentage, intermediate_percentage, diploma_percentage, consecutive_absences, leave_frequency)
@@ -241,6 +250,8 @@ def generate_academic_records(cursor, student_ids):
 def generate_attendance(cursor, student_ids):
     import calendar
     from datetime import date
+    
+    attendance_records = []
     for sid in student_ids:
         # retrieve semesters for the student
         cursor.execute("SELECT semester FROM academic_records WHERE student_id = %s", (sid,))
@@ -253,11 +264,23 @@ def generate_attendance(cursor, student_ids):
             days_to_generate = min(30, month_days)
             for day_offset in range(days_to_generate):
                 attendance_date = date(year, month, day_offset + 1)
-                status = random.choice(['P', 'A'])
-                cursor.execute(
-                    "INSERT INTO attendance (student_id, attendance_date, status) VALUES (%s, %s, %s)",
-                    (sid, attendance_date, status)
-                )
+                status = random.choice(['P', 'P', 'P', 'P', 'P', 'P', 'P', 'P', 'A']) # Weight towards present
+                attendance_records.append((sid, attendance_date, status))
+                
+        # Batch insert every 10000 records to save memory but still be very fast
+        if len(attendance_records) >= 10000:
+            cursor.executemany(
+                "INSERT INTO attendance (student_id, attendance_date, status) VALUES (%s, %s, %s)",
+                attendance_records
+            )
+            attendance_records.clear()
+            
+    # Insert any remaining records
+    if attendance_records:
+        cursor.executemany(
+            "INSERT INTO attendance (student_id, attendance_date, status) VALUES (%s, %s, %s)",
+            attendance_records
+        )
 
 def generate_parent_contacts(cursor, student_ids):
     for sid in student_ids:
@@ -270,11 +293,13 @@ def generate_parent_contacts(cursor, student_ids):
         )
 
 def main():
+    print(f"Connecting to MySQL at {DB_HOST}...")
     conn = mysql.connector.connect(
         host=DB_HOST,
         user=DB_USER,
-        password=DB_PASSWORD,
+        password=DB_PASSWORD
     )
+    conn.autocommit = True
     cursor = conn.cursor()
     generate_schema(cursor)
     dept_ids, year_ids = populate_static_data(cursor)

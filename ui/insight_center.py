@@ -360,25 +360,64 @@ class InsightCenter(ctk.CTkFrame):
     def update_recommendations_panel(self, report):
         for w in self.rec_scroll.winfo_children(): w.destroy()
         
+        # 1. Natural Language Report
+        nlg_text = report.get("nlg_report", "")
+        if nlg_text:
+            nlg_card = ctk.CTkFrame(self.rec_scroll, fg_color="#1a1a1a", corner_radius=6, border_width=1, border_color="#333")
+            nlg_card.pack(fill="x", pady=(0, 10))
+            ctk.CTkLabel(nlg_card, text="AI Analysis Summary", font=("Arial", 11, "bold"), text_color="#00E5FF").pack(anchor="w", padx=15, pady=(10, 2))
+            ctk.CTkLabel(nlg_card, text=nlg_text, font=("Arial", 11), text_color="#ccc", wraplength=420, justify="left").pack(anchor="w", padx=15, pady=(2, 10))
+            
+        # 2. Recommendations
         recs = report.get("recommendations", [])
         if not recs:
             ctk.CTkLabel(self.rec_scroll, text="No urgent recommendations.", text_color="#888").pack(anchor="w", padx=15)
             return
             
-        for i, rec in enumerate(recs[:3]):
+        student_id = self.search_var.get().strip() if hasattr(self, 'search_var') else ""
+        faculty_user = self.controller.shared_data.get("username", "System")
+        college = self.controller.shared_data.get("college_name", "Unknown")
+            
+        for i, rec in enumerate(recs[:4]):
             if isinstance(rec, dict):
                 act = rec.get('action', '')
-                rsn = rec.get('reason', '')
+                rsn = rec.get('rationale', '')
+                out = rec.get('expected_outcome', '')
+                pri = rec.get('priority', 3)
             else:
                 act = str(rec)
                 rsn = "Based on current model evaluation."
+                out = "Improve academic standing."
+                pri = 3
                 
             card = ctk.CTkFrame(self.rec_scroll, fg_color="#1a1a1a", corner_radius=6)
             card.pack(fill="x", pady=4)
             
-            ctk.CTkLabel(card, text="Priority: High", font=("Arial", 10, "bold"), text_color=COLORS["danger"]).pack(anchor="w", padx=15, pady=(10, 2))
-            ctk.CTkLabel(card, text=act, font=("Arial", 12, "bold"), text_color="white", wraplength=400, justify="left").pack(anchor="w", padx=15, pady=2)
-            ctk.CTkLabel(card, text=f"Expected Impact: Directly addresses top risk contributors.", font=("Arial", 11), text_color="#aaa", wraplength=400, justify="left").pack(anchor="w", padx=15, pady=(2, 10))
+            top_row = ctk.CTkFrame(card, fg_color="transparent")
+            top_row.pack(fill="x", padx=15, pady=(10, 2))
+            
+            p_color = COLORS["danger"] if pri == 1 else (COLORS["warning"] if pri == 2 else COLORS["success"])
+            ctk.CTkLabel(top_row, text=f"Priority {pri}", font=("Arial", 10, "bold"), text_color=p_color).pack(side="left")
+            
+            if student_id:
+                # Add action tracking dropdown
+                def make_cmd(action_name=act, rlevel=report.get("level", "Unknown"), dom=report.get("dominant", "Unknown"), pri_level=pri):
+                    def status_changed(new_status):
+                        from logic.intervention_engine import InterventionEngine
+                        ie = InterventionEngine()
+                        # Simple fire-and-forget save (creates a new tracking record for this action)
+                        ie.save_intervention(college, student_id, faculty_user, rlevel, dom, action_name, pri_level, new_status)
+                    return status_changed
+                
+                track_var = ctk.StringVar(value="Planned")
+                tracker = ctk.CTkOptionMenu(top_row, values=["Planned", "In Progress", "Completed"], 
+                                           variable=track_var, width=110, height=20, font=("Arial", 10),
+                                           command=make_cmd())
+                tracker.pack(side="right")
+            
+            ctk.CTkLabel(card, text=act, font=("Arial", 13, "bold"), text_color="white", wraplength=400, justify="left").pack(anchor="w", padx=15, pady=2)
+            ctk.CTkLabel(card, text=f"Rationale: {rsn}", font=("Arial", 11), text_color="#aaa", wraplength=400, justify="left").pack(anchor="w", padx=15, pady=(2, 2))
+            ctk.CTkLabel(card, text=f"Expected: {out}", font=("Arial", 11, "bold"), text_color="#4ADE80", wraplength=400, justify="left").pack(anchor="w", padx=15, pady=(0, 10))
 
     def load_real_student(self):
         reg = self.search_var.get().strip()
@@ -396,6 +435,7 @@ class InsightCenter(ctk.CTkFrame):
                 break
         
         if target:
+            self.current_student_data = target
             from logic.risk_engine import FIELD_SYNONYMS
             self.ignore_updates = True
             

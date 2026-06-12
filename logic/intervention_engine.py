@@ -7,115 +7,69 @@ class InterventionEngine:
         pass
         
     def generate_recommendations(self, risk_level, dominant_factors, data):
-        """
-        Generates a list of recommended actions.
-        risk_level: High, Medium, Low
-        dominant_factors: list of factors, e.g. ['Attendance', 'Backlogs']
-        data: student feature dictionary (attendance, avg_marks, backlogs, etc.)
-        
-        Returns:
-            list of dict: [{"action": str, "priority": int, "rationale": str, "expected_outcome": str}]
-        """
         recommendations = []
         priority_counter = 1
         
         att = data.get('avg_attendance', data.get('attendance', 0))
+        cons_abs = data.get('consecutive_absences', 0)
+        leave_freq = data.get('leave_frequency', 0)
+        cgpa = data.get('cgpa', 0)
         mrks = data.get('avg_marks', data.get('marks', 0))
         bkl = data.get('backlogs', 0)
         
-        # 1. High Risk Logic
+        dom_str = " ".join(dominant_factors).lower()
+        has_att_issue = 'attendance' in dom_str or att < 65 or cons_abs >= 5
+        has_acad_issue = 'mark' in dom_str or 'cgpa' in dom_str or 'exam' in dom_str or 'lab' in dom_str or 'academic' in dom_str or cgpa < 5.0 or mrks < 50
+        has_bkl_issue = 'backlog' in dom_str or bkl >= 3
+        has_behav_issue = 'leave' in dom_str or 'absence' in dom_str or leave_freq >= 5
+        has_trend_issue = 'trend impact' in dom_str
+
         if risk_level == "High":
-            # Mandatory High Risk interventions
-            recommendations.append({
-                "action": "Parent Meeting & Counseling",
-                "priority": priority_counter,
-                "rationale": f"Student is at High Risk. Immediate parent engagement is mandatory.",
-                "expected_outcome": "Identify root causes of poor performance and establish accountability."
-            })
-            priority_counter += 1
-            
-            if 'Attendance' in dominant_factors or att < 65:
-                recommendations.append({
-                    "action": "Strict Daily Attendance Monitoring",
-                    "priority": priority_counter,
-                    "rationale": f"Attendance is critically low at {att}%.",
-                    "expected_outcome": "Improve attendance to above 75% within 4 weeks."
-                })
+            if has_att_issue:
+                recommendations.extend([
+                    {"action": "Parent Meeting", "priority": priority_counter, "rationale": f"Attendance is critically low ({att:.1f}%) and consecutive absences are {cons_abs}.", "expected_outcome": "Immediate intervention by guardians to restore attendance."},
+                    {"action": "Weekly Attendance Monitoring", "priority": priority_counter+1, "rationale": "High risk of dropout due to extreme absence.", "expected_outcome": "Ensure attendance stays above 75% for 4 weeks."}
+                ])
+                priority_counter += 2
+            if has_acad_issue:
+                recommendations.extend([
+                    {"action": "Remedial Classes", "priority": priority_counter, "rationale": f"Poor academic performance detected (Marks: {mrks:.1f}, CGPA: {cgpa:.1f}).", "expected_outcome": "Improve foundational concepts and internal assessment scores."},
+                    {"action": "Dedicated Mentor", "priority": priority_counter+1, "rationale": "Student needs one-on-one academic guidance.", "expected_outcome": "Provide weekly academic mentoring."}
+                ])
+                priority_counter += 2
+            if has_bkl_issue:
+                recommendations.append({"action": "Backlog Recovery Plan", "priority": priority_counter, "rationale": f"Student has {bkl} active backlogs threatening degree progression.", "expected_outcome": "Clear backlogs in upcoming supplementary exams."})
                 priority_counter += 1
-                
-            if 'Backlogs' in dominant_factors or bkl > 2:
-                recommendations.append({
-                    "action": "Special Backlog Coaching",
-                    "priority": priority_counter,
-                    "rationale": f"Student has {bkl} active backlogs threatening degree progression.",
-                    "expected_outcome": "Clear at least 50% of backlogs in upcoming supplementary exams."
-                })
+            if has_trend_issue:
+                recommendations.append({"action": "Intensive Academic Support", "priority": priority_counter, "rationale": "Declining semester trend indicating continuous academic deterioration.", "expected_outcome": "Reverse the negative academic trend."})
                 priority_counter += 1
-                
-            if 'Academics' in dominant_factors or mrks < 50:
-                recommendations.append({
-                    "action": "Mandatory Remedial Classes",
-                    "priority": priority_counter,
-                    "rationale": f"Overall marks ({mrks}%) indicate severe conceptual gaps.",
-                    "expected_outcome": "Improve internal assessment scores by 15%."
-                })
-                priority_counter += 1
-                
-        # 2. Medium Risk Logic
+            if not recommendations:
+                recommendations.append({"action": "Parent Meeting", "priority": priority_counter, "rationale": "Student is broadly classified as High Risk.", "expected_outcome": "Identify root causes of poor performance."})
+
         elif risk_level == "Medium":
-            recommendations.append({
-                "action": "Faculty Mentor Assignment",
-                "priority": priority_counter,
-                "rationale": "Student is showing signs of academic decline and needs guidance.",
-                "expected_outcome": "Provide weekly academic mentoring and course correction."
-            })
+            recommendations.append({"action": "Academic Counseling", "priority": priority_counter, "rationale": "Student is showing signs of academic decline and needs guidance.", "expected_outcome": "Provide early course correction."})
             priority_counter += 1
             
-            if 'Attendance' in dominant_factors or att < 75:
-                recommendations.append({
-                    "action": "Attendance Warning & Counseling",
-                    "priority": priority_counter,
-                    "rationale": f"Attendance has dropped to {att}%.",
-                    "expected_outcome": "Prevent attendance from falling below the 65% threshold."
-                })
+            if has_att_issue:
+                recommendations.append({"action": "Attendance Counseling", "priority": priority_counter, "rationale": f"Attendance has dropped to {att:.1f}%.", "expected_outcome": "Prevent attendance from falling below the 65% threshold."})
                 priority_counter += 1
-                
-            if 'Backlogs' in dominant_factors or bkl > 0:
-                recommendations.append({
-                    "action": "Academic Advisor Meeting",
-                    "priority": priority_counter,
-                    "rationale": f"Student has {bkl} backlogs that need addressing.",
-                    "expected_outcome": "Create a clear study plan for backlog recovery."
-                })
+            if has_bkl_issue:
+                recommendations.append({"action": "Academic Advisor Meeting", "priority": priority_counter, "rationale": f"Student has {bkl} backlogs that need addressing.", "expected_outcome": "Create a clear study plan for backlog recovery."})
                 priority_counter += 1
-                
-            if 'Academics' in dominant_factors or mrks < 60:
-                recommendations.append({
-                    "action": "Subject-Specific Tutoring",
-                    "priority": priority_counter,
-                    "rationale": f"Marks ({mrks}%) show potential weaknesses in core subjects.",
-                    "expected_outcome": "Strengthen understanding of difficult topics."
-                })
+            if has_acad_issue:
+                recommendations.append({"action": "Subject-Specific Tutoring", "priority": priority_counter, "rationale": f"Marks ({mrks:.1f}) show potential weaknesses in core subjects.", "expected_outcome": "Strengthen understanding of difficult topics."})
                 priority_counter += 1
-                
-        # 3. Low Risk Logic
+            if has_behav_issue:
+                recommendations.append({"action": "Student Counseling", "priority": priority_counter, "rationale": f"High leave frequency detected.", "expected_outcome": "Address behavioral or personal issues affecting attendance."})
+                priority_counter += 1
+            
+            recommendations.append({"action": "Faculty Follow-Up", "priority": priority_counter, "rationale": "Ensure student is progressing.", "expected_outcome": "Monthly progress monitoring."})
+
         else:
-            recommendations.append({
-                "action": "Monitor Progress",
-                "priority": priority_counter,
-                "rationale": "Student is currently performing safely.",
-                "expected_outcome": "Maintain current academic trajectory."
-            })
+            recommendations.append({"action": "Monitor Progress", "priority": priority_counter, "rationale": "Student is currently performing safely.", "expected_outcome": "Maintain current academic trajectory."})
             priority_counter += 1
-            
-            if att < 85:
-                recommendations.append({
-                    "action": "Encourage Participation",
-                    "priority": priority_counter,
-                    "rationale": "While safe, attendance could be improved.",
-                    "expected_outcome": "Increase active engagement in classes."
-                })
-                priority_counter += 1
+            if att < 85 or cons_abs > 0:
+                recommendations.append({"action": "Encourage Participation", "priority": priority_counter, "rationale": "While safe, attendance could be improved.", "expected_outcome": "Increase active engagement in classes."})
                 
         return recommendations
 

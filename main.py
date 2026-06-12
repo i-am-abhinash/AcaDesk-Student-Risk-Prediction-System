@@ -107,10 +107,23 @@ class ModernAskYesNo(ctk.CTkToplevel):
 # MAIN APP CONTROLLER
 # ==========================================
 class RiskAnalysisApp(ctk.CTk):
+    def report_callback_exception(self, exc, val, tb):
+        if "invalid command name" in str(val):
+            return
+        # Since ctk.CTk doesn't always have super().report_callback_exception, 
+        # we can just use the base tk method or ignore.
+        import tkinter as tk
+        tk.Tk.report_callback_exception(self, exc, val, tb)
+
+    def on_closing(self):
+        import os
+        os._exit(0)
+
     def __init__(self):
         super().__init__()
         self.title("AcaDesk - Student Risk Analysis System")
         self.geometry("1100x700")
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
         
         # PURE MEMORY STATE (No SQLite)
         self.shared_data = {

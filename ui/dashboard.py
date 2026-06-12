@@ -843,13 +843,40 @@ class AnalyticsPanel(ctk.CTkFrame):
         p_email = data.get('parent_email', 'Not Provided')
         is_email_missing = p_email == 'Not Provided' or not p_email
         
+        def send_email_alert():
+            from logic.email_service import EmailService
+            from tkinter import messagebox
+            
+            emails_to_send = []
+            if data.get("email"): emails_to_send.append(data["email"])
+            if data.get("parent_email"): emails_to_send.append(data["parent_email"])
+            
+            if not emails_to_send:
+                messagebox.showwarning("No Contact Info", "No email addresses found for this student.")
+                return
+                
+            es = EmailService()
+            success = es.send_early_warning_alert(
+                to_emails=emails_to_send,
+                student_name=data.get("display_name", data.get("name", "Student")),
+                student_id=data.get("registration_no", data.get("id", "Unknown")),
+                college_name=self.shared_data.get("college_name", "Your College"),
+                risk_level=report.get("level", "Unknown"),
+                dominant_factor=report.get("dominant", "Multiple Factors")
+            )
+            
+            if success:
+                messagebox.showinfo("Success", f"Alert successfully sent to {', '.join(emails_to_send)}")
+            else:
+                messagebox.showerror("Error", "Failed to send email alert. Check console.")
+                
         btn_notify = ctk.CTkButton(
             header_card, 
-            text="Parent Contact Not Available" if is_email_missing else "📧 Notify Parent", 
-            fg_color="gray" if is_email_missing else (COLORS["danger"] if report['level'] == 'High' else COLORS["accent"]),
-            text_color="darkgray" if is_email_missing else ("white" if report['level'] == 'High' else "black"),
-            state="disabled" if is_email_missing else "normal",
-            command=lambda: self._open_notify_parent_dialog(data, report)
+            text="🔔 Notify", 
+            fg_color="#b91c1c", 
+            hover_color="#991b1b",
+            font=("Arial", 12, "bold"),
+            command=send_email_alert
         )
         btn_notify.pack(side="right", padx=20, pady=20)
         

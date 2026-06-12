@@ -38,21 +38,26 @@ class RiskPredictor:
                 return pd.to_numeric(df[col_name], errors='coerce').fillna(0)
             return pd.Series([0.0]*len(df))
 
-        X['attendance'] = get_col('avg_attendance')
-        X['marks'] = get_col('avg_marks')
+        X['avg_attendance'] = get_col('avg_attendance')
+        X['cgpa'] = get_col('cgpa')
+        # Fallback if cgpa is missing but marks exist
+        if 'cgpa' not in df.columns:
+            X['cgpa'] = get_col('avg_marks') / 10.0
         X['backlogs'] = get_col('backlogs')
-        X['tenth_percentage'] = get_col('tenth')
-        X['intermediate_percentage'] = get_col('inter')
-        X['diploma_percentage'] = get_col('diploma')
+        X['avg_marks'] = get_col('avg_marks')
+        X['tenth'] = get_col('tenth')
+        X['inter'] = get_col('inter')
+        X['diploma'] = get_col('diploma')
         X['lab_performance'] = get_col('lab_performance')
         X['mid_exam_score'] = get_col('mid_exam_score')
+        X['assignment_marks'] = get_col('assignment_marks')
         X['consecutive_absences'] = get_col('consecutive_absences')
         X['leave_frequency'] = get_col('leave_frequency')
 
-        # Make sure they are in the exact order the model expects if using a 10-feature model
-        cols = ['attendance', 'marks', 'backlogs', 'tenth_percentage', 
-                'intermediate_percentage', 'diploma_percentage',
-                'lab_performance', 'mid_exam_score', 'consecutive_absences', 'leave_frequency']
+        cols = ['avg_attendance', 'cgpa', 'backlogs', 'avg_marks', 
+                'mid_exam_score', 'lab_performance', 'assignment_marks',
+                'tenth', 'inter', 'diploma', 
+                'consecutive_absences', 'leave_frequency']
         X = X[cols]
 
         if self.model:
@@ -102,13 +107,15 @@ class RiskPredictor:
         # 1. Sanitize Inputs & Create DataFrame
         try:
             att = float(student_features.get('attendance', student_features.get('avg_attendance', 0)) or 0)
-            mrk = float(student_features.get('marks', student_features.get('avg_marks', 0)) or 0)
+            cgpa = float(student_features.get('cgpa', student_features.get('avg_marks', 0)/10.0) or 0)
             bkl = int(student_features.get('backlogs', 0) or 0)
+            internal = float(student_features.get('internal_marks', student_features.get('avg_marks', 0)) or 0)
+            mid = float(student_features.get('mid_exam_score', 0) or 0)
+            lab = float(student_features.get('lab_performance', 0) or 0)
+            assign = float(student_features.get('assignment_marks', 0) or 0)
             tenth = float(student_features.get('tenth_percentage', 0) or 0)
             inter = float(student_features.get('intermediate_percentage', 0) or 0)
             diploma = float(student_features.get('diploma_percentage', 0) or 0)
-            lab = float(student_features.get('lab_performance', 0) or 0)
-            mid = float(student_features.get('mid_exam_score', 0) or 0)
             cons_abs = int(student_features.get('consecutive_absences', 0) or 0)
             leave_freq = int(student_features.get('leave_frequency', 0) or 0)
         except Exception: 
@@ -116,16 +123,16 @@ class RiskPredictor:
 
         missing_data = []
         if att == 0: missing_data.append("Attendance")
-        if mrk == 0: missing_data.append("Marks")
         
         confidence = "High" if not missing_data else "Low (Missing Data)"
 
-        # Prepare 10 features in exactly the order model expects
-        cols = ['attendance', 'marks', 'backlogs', 'tenth_percentage', 
-                'intermediate_percentage', 'diploma_percentage',
-                'lab_performance', 'mid_exam_score', 'consecutive_absences', 'leave_frequency']
+        # Prepare 12 features in exactly the order model expects
+        cols = ['avg_attendance', 'cgpa', 'backlogs', 'avg_marks', 
+                'mid_exam_score', 'lab_performance', 'assignment_marks',
+                'tenth', 'inter', 'diploma', 
+                'consecutive_absences', 'leave_frequency']
         
-        row_data = [[att, mrk, bkl, tenth, inter, diploma, lab, mid, cons_abs, leave_freq]]
+        row_data = [[att, cgpa, bkl, internal, mid, lab, assign, tenth, inter, diploma, cons_abs, leave_freq]]
         input_data = pd.DataFrame(row_data, columns=cols)
 
         if not self.model: 
@@ -206,14 +213,6 @@ class RiskPredictor:
                 print("SHAP calculation failed:", e)
                 shap_dict = {}
 
-            # 6. Generate Recommendations
-            from logic.intervention_engine import InterventionEngine
-            ie = InterventionEngine()
-            
-            # Use SHAP dict to find top factors
-            top_factors = [k for k, v in sorted(shap_dict.items(), key=lambda item: abs(item[1]), reverse=True)[:2]]
-            recommendations = ie.generate_recommendations(pred, top_factors, student_features)
-            nlg_report = ie.generate_nlp_report(pred, top_factors, student_features, recommendations)
             # Trend Integration
             trend_info = None
             if history_data:
@@ -228,34 +227,34 @@ class RiskPredictor:
                 risk_score = 75
             risk_score = round(max(0, min(100, risk_score)), 1)
 
+            # Extract Contributions (Dynamic SHAP or Fallback)
+            if 'shap_dict' in locals() and shap_dict:
+                # Add Trend Impact to the SHAP values visually if trend exists
+                if trend_info and trend_info.get("trend_score", 50) != 50:
+                    # Calculate an arbitrary SHAP value equivalent for trend based on the score deviation
+                    trend_impact = (50 - trend_info["trend_score"]) / 100.0  # scaled
+                    shap_dict["Trend Impact"] = trend_impact
+                    
+                total_shap_abs = sum(abs(v) for v in shap_dict.values())
+                if total_shap_abs > 0:
+                    contribs = {k.replace("_", " ").title(): (abs(v) / total_shap_abs) * 100 for k, v in shap_dict.items() if abs(v) > 0.01}
+                else:
+                    contribs = {"No Major Factors": 100}
+            else:
+                contribs = {}
+
+            # Generate Recommendations
+            from logic.intervention_engine import InterventionEngine
+            ie = InterventionEngine()
+            
+            # Use updated shap_dict to find top factors (now including Trend Impact)
+            top_factors = [k for k, v in sorted(shap_dict.items(), key=lambda item: abs(item[1]), reverse=True)[:2]]
+            recommendations = ie.generate_recommendations(pred, top_factors, student_features)
+            nlg_report = ie.generate_nlp_report(pred, top_factors, student_features, recommendations)
+
         except Exception as e:
             print("Analyze Exception:", e)
             return self._get_fallback_report(att, mrk, bkl)
-
-        # 4. Extract Contributions (Dynamic SHAP or Fallback)
-        if 'shap_dict' in locals() and shap_dict:
-            # Add Trend Impact to the SHAP values visually if trend exists
-            if trend_info and trend_info.get("trend_score", 50) != 50:
-                # Calculate an arbitrary SHAP value equivalent for trend based on the score deviation
-                trend_impact = (50 - trend_info["trend_score"]) / 100.0  # scaled
-                shap_dict["Trend Impact"] = trend_impact
-                
-            total_shap_abs = sum(abs(v) for v in shap_dict.values())
-            if total_shap_abs > 0:
-                contribs = {k.replace("_", " ").title(): (abs(v) / total_shap_abs) * 100 for k, v in shap_dict.items() if abs(v) > 0.01}
-            else:
-                contribs = {"No Major Factors": 100}
-        else:
-            # Fallback Explainability if SHAP fails
-            dev_att = max(0, 75 - att) / 75 if att > 0 else 0
-            dev_mrk = max(0, 50 - mrk) / 50 if mrk > 0 else 0
-            dev_bkl = min(5, bkl) / 5
-            total_dev = max(1, dev_att + dev_mrk + dev_bkl)
-            contribs = {
-                "Attendance": (dev_att / total_dev) * 100, 
-                "Academics": (dev_mrk / total_dev) * 100, 
-                "Backlogs": (dev_bkl / total_dev) * 100
-            }
         
         # 5. Dominant Factor Logic
         if risk_score < 20:
