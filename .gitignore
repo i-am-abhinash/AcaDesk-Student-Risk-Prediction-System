@@ -6,3 +6,5 @@ dist/
 *.exe
 *.pkg
 *.pyz
+.env
+secret.key
