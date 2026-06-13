@@ -42,19 +42,37 @@ class DBHandler:
         self.connect()
 
     def connect(self):
+        host = self.config.get('host', 'localhost')
+        user = self.config.get('user', 'root')
+        password = self.config.get('password', '')
+        database = self.config.get('database', 'engineering_college')
+        port = int(self.config.get('port', 3306))
+
+        if not password:
+            print(f"❌ ERP Connection Warning: No password provided for user '{user}' on {host}")
+            # We still try to connect because some local dev environments might not have a password
+            # but we log it clearly.
+
         try:
             import mysql.connector
             self.conn = mysql.connector.connect(
-                host=self.config.get('host', 'localhost'),
-                user=self.config.get('user', 'root'),
-                password=self.config.get('password', ''),
-                database=self.config.get('database', 'engineering_college'),
-                port=int(self.config.get('port', 3306))
+                host=host,
+                user=user,
+                password=password,
+                database=database,
+                port=port,
+                connect_timeout=10
             )
             self.cursor = self.conn.cursor(dictionary=True)
             self.connected = True
+        except mysql.connector.Error as err:
+            print(f"❌ ERP Database Connection Failed: {err.msg} (Code: {err.errno})")
+            if err.errno == 1045:
+                print(f"   Hint: Access denied for '{user}'@'{host}'. Please verify ERP database credentials.")
+            self.connected = False
         except Exception as e:
-            print(f"❌ Connection Failed: {e}")
+            print(f"❌ ERP Unexpected Connection Error: {e}")
+            self.connected = False
 
     def close(self):
         if self.cursor:
@@ -104,9 +122,9 @@ class DBHandler:
         try:
             year_val = str(year)[0] if "Year" in str(year) else year
             sql_select = f"s.{self.map['id']} AS sid, s.{self.map['name']} AS sname, s.{self.map['year']} AS syear, a.{self.map['att']} AS satt, a.{self.map['marks']} AS smarks, a.{self.map['backlogs']} AS sbkl"
-            if self.map['tenth']: sql_select += f", s.{self.map['tenth']} AS stenth"
-            if self.map['inter']: sql_select += f", s.{self.map['inter']} AS sinter"
-            if self.map['diploma']: sql_select += f", s.{self.map['diploma']} AS sdiploma"
+            if self.map['tenth']: sql_select += f", a.{self.map['tenth']} AS stenth"
+            if self.map['inter']: sql_select += f", a.{self.map['inter']} AS sinter"
+            if self.map['diploma']: sql_select += f", a.{self.map['diploma']} AS sdiploma"
             if self.map['lab_perf']: sql_select += f", a.{self.map['lab_perf']} AS slab"
             if self.map['mid_exam']: sql_select += f", a.{self.map['mid_exam']} AS smid"
             if self.map['cons_abs']: sql_select += f", a.{self.map['cons_abs']} AS scons_abs"
@@ -180,9 +198,9 @@ class DBHandler:
         if not self.conn: return []
         try:
             sql_select = f"s.{self.map['id']} AS sid, s.{self.map['join_branch']} AS bid, s.{self.map['year']} AS syear, a.{self.map['att']} AS att, a.{self.map['marks']} AS marks, a.{self.map['backlogs']} AS bkl"
-            if self.map['tenth']: sql_select += f", s.{self.map['tenth']} AS stenth"
-            if self.map['inter']: sql_select += f", s.{self.map['inter']} AS sinter"
-            if self.map['diploma']: sql_select += f", s.{self.map['diploma']} AS sdiploma"
+            if self.map['tenth']: sql_select += f", a.{self.map['tenth']} AS stenth"
+            if self.map['inter']: sql_select += f", a.{self.map['inter']} AS sinter"
+            if self.map['diploma']: sql_select += f", a.{self.map['diploma']} AS sdiploma"
             if self.map['lab_perf']: sql_select += f", a.{self.map['lab_perf']} AS slab"
             if self.map['mid_exam']: sql_select += f", a.{self.map['mid_exam']} AS smid"
             if self.map['cons_abs']: sql_select += f", a.{self.map['cons_abs']} AS scons_abs"
@@ -237,9 +255,9 @@ class DBHandler:
         if not self.conn: return []
         try:
             sql_select = f"a.{self.map['att']} AS att, a.{self.map['marks']} AS marks, a.{self.map['backlogs']} AS bkl"
-            if self.map['tenth']: sql_select += f", s.{self.map['tenth']} AS stenth"
-            if self.map['inter']: sql_select += f", s.{self.map['inter']} AS sinter"
-            if self.map['diploma']: sql_select += f", s.{self.map['diploma']} AS sdiploma"
+            if self.map['tenth']: sql_select += f", a.{self.map['tenth']} AS stenth"
+            if self.map['inter']: sql_select += f", a.{self.map['inter']} AS sinter"
+            if self.map['diploma']: sql_select += f", a.{self.map['diploma']} AS sdiploma"
             if self.map['lab_perf']: sql_select += f", a.{self.map['lab_perf']} AS slab"
             if self.map['mid_exam']: sql_select += f", a.{self.map['mid_exam']} AS smid"
             if self.map['cons_abs']: sql_select += f", a.{self.map['cons_abs']} AS scons_abs"

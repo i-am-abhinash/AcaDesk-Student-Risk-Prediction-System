@@ -4,119 +4,111 @@ from PIL import Image
 from logic.config_manager import load_config, save_config
 from logic.db_handler import DBHandler
 from logic.central_auth import CentralAuth
-
-# Design color palette
-COLORS = {
-    "bg": "#0A0A0A",
-    "card": "#141414",
-    "secondary": "#1A1A1A",
-    "accent": "#00E5FF",
-    "success": "#00D26A",
-    "warning": "#FFA726",
-    "danger": "#FF4C4C",
-    "text": "#FFFFFF",
-    "subtext": "#A0A0A0"
-}
+from ui.styles import COLORS, FONTS
 
 class ERPSetupScreen(ctk.CTkFrame):
     def __init__(self, parent, controller):
-        super().__init__(parent, fg_color=COLORS["bg"])
+        super().__init__(parent, fg_color="#0B0E14")
         self.controller = controller
         self.valid_config = None
         self._build_ui()
 
     def _build_ui(self):
         # Centered main card
-        self.card = ctk.CTkFrame(self, fg_color=COLORS["card"], width=950, height=700,
-                                 corner_radius=20)
+        self.card = ctk.CTkFrame(self, fg_color="#12141E", width=800, height=660,
+                                 corner_radius=16, border_width=1, border_color="#2A2E3F")
+        self.card.pack_propagate(False)
         self.card.place(relx=0.5, rely=0.5, anchor="center")
-        # Shadow effect – add an outer frame with slight offset and cyan glow
-        self.card.configure(border_width=2, border_color="#00E5FF")
 
         # Header with title and subtitle
-        header_frame = ctk.CTkFrame(self.card, fg_color=COLORS["card"])
-        header_frame.pack(pady=(30, 10), fill="x")
+        header_frame = ctk.CTkFrame(self.card, fg_color="transparent")
+        header_frame.pack(pady=(20, 5), fill="x")
         # Title with database icon (using Unicode)
         title_lbl = ctk.CTkLabel(header_frame, text="\U0001F4C1 ERP Connection Setup",
-                                 font=("Montserrat", 28, "bold"), text_color=COLORS["accent"])
+                                 font=("Outfit", 26, "bold"), text_color="#00E5FF")
         title_lbl.pack(pady=(0, 5))
-        subtitle_lbl = ctk.CTkLabel(header_frame, text="Connect AcaDesk securely to your institution ERP database. All student data remains read‑only.",
-                                    font=("Arial", 14), text_color=COLORS["subtext"], wraplength=800, justify="center")
+        subtitle_lbl = ctk.CTkLabel(header_frame, text="Connect AcaDesk securely to your institution ERP database. All student data remains read-only.",
+                                    font=("Inter", 13), text_color="#7A849C", wraplength=700, justify="center")
         subtitle_lbl.pack()
 
         # Content split: left illustration, right form + status
-        content_frame = ctk.CTkFrame(self.card, fg_color=COLORS["card"])
-        content_frame.pack(pady=20, fill="both", expand=True)
-
-# Left side illustration removed for a cleaner UI
-# Image omitted – the ERP illustration has been removed as requested.
+        content_frame = ctk.CTkFrame(self.card, fg_color="transparent")
+        content_frame.pack(pady=10, fill="both", expand=True)
 
         # Right side form and status panel
-        right_frame = ctk.CTkFrame(content_frame, fg_color=COLORS["secondary"])
+        right_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
         right_frame.pack(side="right", padx=20, fill="both", expand=True)
 
         # Form fields
         field_cfg = {
             "width": 350,
-            "height": 50,
-            "corner_radius": 12,
-            "fg_color": "#1E1E1E",
-            "border_width": 0,
-            "placeholder_text_color": COLORS["subtext"]
+            "height": 40,
+            "corner_radius": 8,
+            "fg_color": "#1A1D2D",
+            "border_width": 1,
+            "border_color": "#2A2E3F",
+            "text_color": "white",
+            "font": ("Inter", 13),
+            "placeholder_text_color": "#7A849C"
         }
         self.erp_host = ctk.CTkEntry(right_frame, placeholder_text="Host (e.g. localhost)", **field_cfg)
-        self.erp_host.pack(pady=10)
+        self.erp_host.pack(pady=5)
         self.erp_port = ctk.CTkEntry(right_frame, placeholder_text="Port (e.g. 3306)", **field_cfg)
-        self.erp_port.pack(pady=10)
+        self.erp_port.pack(pady=5)
         self.erp_db = ctk.CTkEntry(right_frame, placeholder_text="Database Name", **field_cfg)
-        self.erp_db.pack(pady=10)
+        self.erp_db.pack(pady=5)
         self.erp_user = ctk.CTkEntry(right_frame, placeholder_text="Username", **field_cfg)
-        self.erp_user.pack(pady=10)
+        self.erp_user.pack(pady=5)
         self.erp_pass = ctk.CTkEntry(right_frame, placeholder_text="Password", show="*", **field_cfg)
-        self.erp_pass.pack(pady=10)
+        self.erp_pass.pack(pady=5)
+        self.erp_pass.bind("<Return>", lambda event: self.test_connection())
 
         # ERP Status Panel (below form)
-        status_panel = ctk.CTkFrame(right_frame, fg_color=COLORS["secondary"], corner_radius=10)
+        status_panel = ctk.CTkFrame(right_frame, fg_color="#1A1D2D", corner_radius=10, border_width=1, border_color="#2A2E3F")
         status_panel.pack(pady=15, fill="x")
-        ctk.CTkLabel(status_panel, text="ERP Status", font=("Arial", 12, "bold"), text_color=COLORS["accent"]).pack(pady=(5,0))
-        self.lbl_conn_status = ctk.CTkLabel(status_panel, text="Not Connected", font=("Arial", 11), text_color=COLORS["warning"])
+        ctk.CTkLabel(status_panel, text="ERP Status", font=("Inter", 13, "bold"), text_color="#00E5FF").pack(pady=(10,0))
+        self.lbl_conn_status = ctk.CTkLabel(status_panel, text="Not Connected", font=("Inter", 12), text_color="#FFA726")
         self.lbl_conn_status.pack()
-        self.lbl_mode = ctk.CTkLabel(status_panel, text="Mode: Read Only", font=("Arial", 11), text_color=COLORS["subtext"])
+        self.lbl_mode = ctk.CTkLabel(status_panel, text="Mode: Read Only", font=("Inter", 12), text_color="#7A849C")
         self.lbl_mode.pack()
-        self.lbl_security = ctk.CTkLabel(status_panel, text="Security: Protected", font=("Arial", 11), text_color=COLORS["subtext"])
+        self.lbl_security = ctk.CTkLabel(status_panel, text="Security: Protected", font=("Inter", 12), text_color="#7A849C")
         self.lbl_security.pack(pady=(0,5))
         # New label for schema diagnostics
-        self.lbl_schema = ctk.CTkLabel(status_panel, text="", font=("Arial", 10), text_color=COLORS["subtext"], wraplength=300)
-        self.lbl_schema.pack(pady=(5,0))
+        self.lbl_schema = ctk.CTkLabel(status_panel, text="", font=("Inter", 12), text_color="#7A849C", wraplength=300)
+        self.lbl_schema.pack(pady=(5,10))
+
+        # Action Buttons Frame
+        btn_frame = ctk.CTkFrame(self.card, fg_color="transparent")
+        btn_frame.pack(pady=10)
 
         # Test Connection button
-        self.btn_test = ctk.CTkButton(self.card, text="Test Connection", width=250, height=50,
-                                     fg_color=COLORS["accent"], hover_color="#00FFFF",
-                                     text_color=COLORS["bg"], font=("Arial", 14, "bold"),
+        self.btn_test = ctk.CTkButton(btn_frame, text="Test Connection", width=250, height=45,
+                                     fg_color="#00E5FF", hover_color="#00B3CC", corner_radius=8,
+                                     text_color="black", font=("Outfit", 14, "bold"),
                                      command=self.test_connection)
-        self.btn_test.pack(pady=10)
+        self.btn_test.pack(side="left", padx=10)
 
         # Save & Continue button (initially disabled)
-        self.btn_proceed = ctk.CTkButton(self.card, text="Save Connection & Continue", width=300, height=50,
-                                        fg_color=COLORS["success"], hover_color="#00FF80",
-                                        text_color=COLORS["bg"], font=("Arial", 14, "bold"),
-                                        state="disabled", command=self.save_and_continue)
-        self.btn_proceed.pack(pady=10)
+        self.btn_proceed = ctk.CTkButton(btn_frame, text="Save Connection & Continue", width=300, height=45,
+                                         fg_color="#00C853", hover_color="#00E676", corner_radius=8,
+                                         text_color="white", font=("Outfit", 14, "bold"),
+                                         state="disabled", command=self.save_and_continue)
+        self.btn_proceed.pack(side="left", padx=10)
 
         # Security notice at bottom of card
-        notice_frame = ctk.CTkFrame(self.card, fg_color=COLORS["secondary"], corner_radius=10)
+        notice_frame = ctk.CTkFrame(self.card, fg_color="transparent")
         notice_frame.pack(pady=15, fill="x", padx=30)
-        ctk.CTkLabel(notice_frame, text="\U0001F6E1 AcaDesk operates in strict ERP Read‑Only mode. No student records are modified, deleted, or written back to the college ERP.",
-                     font=("Arial", 11), text_color=COLORS["subtext"], wraplength=850, justify="center").pack(pady=5)
+        ctk.CTkLabel(notice_frame, text="\U0001F6E1 AcaDesk operates in strict ERP Read-Only mode. No student records are modified, deleted, or written back to the college ERP.",
+                     font=("Inter", 12), text_color="#7A849C", wraplength=850, justify="center").pack(pady=5)
 
     def on_show(self):
-        self.lbl_conn_status.configure(text="Not Connected", text_color=COLORS["warning"])
+        self.lbl_conn_status.configure(text="Not Connected", text_color="#FFA726")
         self.btn_proceed.configure(state="disabled")
         self.valid_config = None
 
     def test_connection(self):
         # Update status panel
-        self.lbl_conn_status.configure(text="Testing connection...", text_color=COLORS["subtext"])
+        self.lbl_conn_status.configure(text="Testing connection...", text_color="#A0A0A0")
         self.update()
         config = {
             "host": self.erp_host.get(),
@@ -127,34 +119,20 @@ class ERPSetupScreen(ctk.CTkFrame):
         }
         db = DBHandler(config)
         if not db.connected:
-            self.lbl_conn_status.configure(text="Connection Failed", text_color=COLORS["warning"])
+            self.lbl_conn_status.configure(text="Connection Failed", text_color="#FFA726")
             return
+        # Check tables but don't block
         success, msg = db.validate_tables()
         if not success:
-            self.lbl_conn_status.configure(text=f"Table Validation Failed: {msg}", text_color=COLORS["warning"])
-            return
-        # Schema diagnostics
-        detected_students = sorted(db.student_columns)
-        detected_academics = sorted(db.academic_columns)
-        missing_student = db.expected_student_keys - {k for k, v in db.map.items() if k in db.expected_student_keys and v in db.student_columns}
-        missing_academic = db.expected_academic_keys - {k for k, v in db.map.items() if k in db.expected_academic_keys and v in db.academic_columns}
-        diag_msg = "Detected Columns: Student " + str(detected_students) + ", Academic " + str(detected_academics)
-        if missing_student or missing_academic:
-            diag_msg += " | Missing:"
-            if missing_student:
-                diag_msg += " Student " + str(sorted(missing_student))
-            if missing_academic:
-                diag_msg += " Academic " + str(sorted(missing_academic))
-        self.lbl_schema.configure(text=diag_msg)
-        sample_data = db.get_sample_data()
-        if sample_data:
-            self.lbl_conn_status.configure(text="Connected", text_color=COLORS["success"])
-            self.btn_proceed.configure(state="normal")
-            self.valid_config = config
-            self.show_success_card()
-            self.show_preview_window(sample_data)
+            self.lbl_conn_status.configure(text="Connected (No Data/Tables)", text_color="#FFA726")
+            self.lbl_schema.configure(text=msg)
         else:
-            self.lbl_conn_status.configure(text="Unable to read sample data", text_color=COLORS["warning"])
+            self.lbl_conn_status.configure(text="Connected (Tables Detected)", text_color="#00C853")
+            self.lbl_schema.configure(text="Schema is perfectly mapped and ready.")
+
+        # Always allow them to save the connection as long as it connects!
+        self.btn_proceed.configure(state="normal")
+        self.valid_config = config
 
     def show_success_card(self):
         # Transient success overlay
@@ -163,8 +141,8 @@ class ERPSetupScreen(ctk.CTkFrame):
         success_win.geometry("400x200")
         success_win.grab_set()
         success_win.configure(fg_color=COLORS["card"])
-        ctk.CTkLabel(success_win, text="\u2714 ERP Connection Successful", font=("Arial", 18, "bold"), text_color=COLORS["success"]).pack(pady=20)
-        ctk.CTkLabel(success_win, text="Server Reachable | Credentials Verified | Read‑Only Access Confirmed | Student Records Found", font=("Arial", 12), text_color=COLORS["text"], wraplength=350, justify="center").pack(pady=10)
+        ctk.CTkLabel(success_win, text="\u2714 ERP Connection Successful", font=FONTS["h2"], text_color="#00D26A").pack(pady=20)
+        ctk.CTkLabel(success_win, text="Server Reachable | Credentials Verified | Read‑Only Access Confirmed | Student Records Found", font=FONTS["body"], text_color=COLORS["text"], wraplength=350, justify="center").pack(pady=10)
         ctk.CTkButton(success_win, text="Continue", command=success_win.destroy, fg_color=COLORS["accent"], text_color=COLORS["bg"]).pack(pady=10)
         success_win.after(100, lambda: success_win.lift())
 
@@ -173,19 +151,19 @@ class ERPSetupScreen(ctk.CTkFrame):
         preview.title("Sample Data Preview")
         preview.geometry("600x450")
         preview.configure(fg_color=COLORS["bg"])
-        ctk.CTkLabel(preview, text="Detected Student Records", font=("Arial", 18, "bold"), text_color=COLORS["accent"]).pack(pady=15)
+        ctk.CTkLabel(preview, text="Detected Student Records", font=FONTS["h2"], text_color=COLORS["accent"]).pack(pady=15)
         # Table header
-        header = ctk.CTkFrame(preview, fg_color=COLORS["secondary"])
+        header = ctk.CTkFrame(preview, fg_color="#1A1A1A")
         header.pack(fill="x", padx=20)
         for col in ["Student Name", "Roll Number", "Department"]:
-            ctk.CTkLabel(header, text=col, font=("Arial", 12, "bold"), text_color=COLORS["text"], width=180).pack(side="left", padx=5, pady=5)
+            ctk.CTkLabel(header, text=col, font=FONTS["body"], text_color=COLORS["text"], width=180).pack(side="left", padx=5, pady=5)
         # Sample rows (first 5)
         for row in data["samples"][:5]:
             row_frame = ctk.CTkFrame(preview, fg_color=COLORS["card"])
             row_frame.pack(fill="x", padx=20, pady=2)
-            ctk.CTkLabel(row_frame, text=row.get("name", ""), font=("Arial", 12), text_color=COLORS["text"], width=180).pack(side="left", padx=5)
-            ctk.CTkLabel(row_frame, text=row.get("roll_no", ""), font=("Arial", 12), text_color=COLORS["text"], width=180).pack(side="left", padx=5)
-            ctk.CTkLabel(row_frame, text=row.get("branch_name", ""), font=("Arial", 12), text_color=COLORS["text"], width=180).pack(side="left", padx=5)
+            ctk.CTkLabel(row_frame, text=row.get("name", ""), font=FONTS["body"], text_color=COLORS["text"], width=180).pack(side="left", padx=5)
+            ctk.CTkLabel(row_frame, text=row.get("roll_no", ""), font=FONTS["body"], text_color=COLORS["text"], width=180).pack(side="left", padx=5)
+            ctk.CTkLabel(row_frame, text=row.get("branch_name", ""), font=FONTS["body"], text_color=COLORS["text"], width=180).pack(side="left", padx=5)
         ctk.CTkButton(preview, text="Close Preview", command=preview.destroy, fg_color=COLORS["accent"], text_color=COLORS["bg"]).pack(pady=15)
 
     def save_and_continue(self):
@@ -210,17 +188,14 @@ class ERPSetupScreen(ctk.CTkFrame):
         self.controller.shared_data["erp_config"] = self.valid_config
         self.controller.show_frame("DashboardScreen")
 
-# ---------------------------------------------------------------------------
-# Connection Diagnostics Screen (original implementation retained for imports)
-# ---------------------------------------------------------------------------
 class ConnectionDiagnosticsScreen(ctk.CTkFrame):
     def __init__(self, parent, controller):
         super().__init__(parent, fg_color=COLORS["bg"])
         self.controller = controller
-        ctk.CTkLabel(self, text="CONNECTION DIAGNOSTICS", font=("Montserrat", 24, "bold"), text_color=COLORS["danger"]).pack(pady=(50, 10))
-        self.lbl_error = ctk.CTkLabel(self, text="A database connection error occurred.", font=("Arial", 16), text_color="#E0E0E0")
+        ctk.CTkLabel(self, text="CONNECTION DIAGNOSTICS", font=FONTS["h1"], text_color="#FF4C4C").pack(pady=(50, 10))
+        self.lbl_error = ctk.CTkLabel(self, text="A database connection error occurred.", font=FONTS["h3"], text_color="#E0E0E0")
         self.lbl_error.pack(pady=20)
-        self.log_box = ctk.CTkTextbox(self, width=600, height=200, fg_color=COLORS["card"], text_color="#E0E0E0", font=("Consolas", 14))
+        self.log_box = ctk.CTkTextbox(self, width=600, height=200, fg_color=COLORS["card"], text_color="#E0E0E0", font=FONTS["code"])
         self.log_box.pack(pady=20)
         ctk.CTkButton(self, text="Back to Login", fg_color="#333", text_color="white", command=lambda: self.controller.show_frame("WelcomeScreen")).pack(pady=10)
 

@@ -15,11 +15,18 @@ class SchemaDetector:
     def connect(self):
         try:
             self.conn = mysql.connector.connect(
-                host=self.host, port=self.port, database=self.db, user=self.user, password=self.pwd
+                host=self.host, 
+                port=self.port, 
+                database=self.db, 
+                user=self.user, 
+                password=self.pwd,
+                connect_timeout=10
             )
             return True, "Connected successfully"
+        except mysql.connector.Error as err:
+            return False, f"MySQL Error: {err.msg} (Code: {err.errno})"
         except Exception as e:
-            return False, str(e)
+            return False, f"Unexpected Connection Error: {str(e)}"
 
     def scan_schema(self):
         if not self.conn: return False

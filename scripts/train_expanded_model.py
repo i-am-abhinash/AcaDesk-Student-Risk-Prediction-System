@@ -9,24 +9,27 @@ import json
 import os
 
 def fetch_data():
-    config_path = os.path.join(os.path.dirname(__file__), '..', 'db_config.json')
-    with open(config_path, 'r') as f:
-        config = json.load(f)['erp']
-    
     import sys
     sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+    from logic.config_manager import load_config
     from logic.db_handler import DBHandler
     
-    # Connect to central DB to get the schema map
-    central_config = json.load(open(config_path))['central']
-    c_conn = mysql.connector.connect(**central_config)
-    c_cursor = c_conn.cursor(dictionary=True)
-    c_cursor.execute("SELECT * FROM erp_configs WHERE college_name=%s", ("Vishnu",))
-    schema_map = c_cursor.fetchone()
-    c_conn.close()
+    all_cfg = load_config()
+    config = all_cfg.get('erp', {})
+    central_config = all_cfg.get('central', {})
     
-    if schema_map:
-        config.update(schema_map)
+    # Connect to central DB to get the schema map
+    try:
+        c_conn = mysql.connector.connect(**central_config)
+        c_cursor = c_conn.cursor(dictionary=True)
+        c_cursor.execute("SELECT * FROM erp_configs WHERE college_name=%s", ("Vishnu",))
+        schema_map = c_cursor.fetchone()
+        c_conn.close()
+        
+        if schema_map:
+            config.update(schema_map)
+    except Exception as e:
+        print(f"⚠️ Warning: Could not fetch ERP config from central DB: {e}")
     
     db = DBHandler(config)
     data = db.get_training_data()

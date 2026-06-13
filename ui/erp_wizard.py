@@ -6,22 +6,22 @@ from logic.central_auth import CentralAuth
 
 class ERPWizard(ctk.CTkFrame):
     def __init__(self, parent, controller, dash):
-        super().__init__(parent, fg_color="#111")
+        super().__init__(parent, fg_color="#0B0E14")
         self.controller = controller
         self.dash = dash
         self.current_step = 1
         self.schema_results = None
         
-        self.container = ctk.CTkFrame(self, corner_radius=20, fg_color="#1a1a1a")
+        self.container = ctk.CTkFrame(self, corner_radius=16, fg_color="#12141E", border_width=1, border_color="#2A2E3F")
         self.container.pack(fill="both", expand=True, padx=120, pady=40)
         
         self.header = ctk.CTkFrame(self.container, fg_color="transparent")
         self.header.pack(fill="x", pady=(30, 10), padx=30)
         
-        head_lbl = ctk.CTkLabel(self.header, text="AUTO-DETECT ERP SETUP", font=("Arial Black", 24))
+        head_lbl = ctk.CTkLabel(self.header, text="AUTO-DETECT ERP SETUP", font=("Outfit", 26, "bold"), text_color="#00E5FF")
         head_lbl.pack(anchor="w")
         
-        self.step_lbl = ctk.CTkLabel(self.header, text="Step 1 of 2", text_color="gray")
+        self.step_lbl = ctk.CTkLabel(self.header, text="Step 1 of 2", font=("Inter", 14), text_color="#7A849C")
         self.step_lbl.pack(anchor="w")
         
         self.main_body = ctk.CTkFrame(self.container, fg_color="transparent")
@@ -30,8 +30,8 @@ class ERPWizard(ctk.CTkFrame):
         self.footer = ctk.CTkFrame(self.container, fg_color="transparent")
         self.footer.pack(fill="x", padx=40, pady=20, side="bottom")
         
-        self.btn_back = ctk.CTkButton(self.footer, text="← BACK", height=45, fg_color="#333", command=self.prev_step)
-        self.btn_action = ctk.CTkButton(self.footer, text="SCAN & DETECT SCHEMA →", height=45, fg_color="#00E5FF", text_color="black", command=self.do_scan)
+        self.btn_back = ctk.CTkButton(self.footer, text="← BACK", height=45, fg_color="transparent", text_color="#7A849C", hover_color="#1A1D2D", font=("Inter", 13), command=self.prev_step)
+        self.btn_action = ctk.CTkButton(self.footer, text="SCAN & DETECT SCHEMA →", height=45, fg_color="#00E5FF", hover_color="#00B3CC", font=("Outfit", 15, "bold"), text_color="black", command=self.do_scan)
         
         self.init_steps()
         self.show_step(1)
@@ -43,25 +43,30 @@ class ERPWizard(ctk.CTkFrame):
         form_scroll = ctk.CTkScrollableFrame(self.s1, fg_color="transparent")
         form_scroll.pack(side="left", fill="both", expand=True, padx=10)
         
-        info_panel = ctk.CTkFrame(self.s1, fg_color=COLORS["card"], corner_radius=15, width=300)
+        info_panel = ctk.CTkFrame(self.s1, fg_color="#151923", corner_radius=15, width=300, border_color="#2A2F45", border_width=1)
         info_panel.pack(side="right", fill="y", padx=10)
         info_panel.pack_propagate(False)
-        ctk.CTkLabel(info_panel, text="1. Connection", font=("Arial", 18, "bold"), text_color="#00E5FF").pack(pady=20)
-        ctk.CTkLabel(info_panel, text="Provide Database Server Credentials. We will connect and automatically scan for student tables.", text_color="#ccc", wraplength=250, justify="left").pack(padx=20)
+        ctk.CTkLabel(info_panel, text="1. Connection", font=("Outfit", 20, "bold"), text_color="#00E5FF").pack(pady=(30, 15))
+        ctk.CTkLabel(info_panel, text="Provide Database Server Credentials.\n\nWe will connect securely and automatically scan the structure to detect student, academic, and branch tables.", text_color="#8B949E", font=("Inter", 14), wraplength=250, justify="left").pack(padx=25)
         
         def add_field(parent, label_text, default_value, secret=False):
             row = ctk.CTkFrame(parent, fg_color="transparent")
-            row.pack(fill="x", pady=12)
+            row.pack(fill="x", pady=10)
             row.grid_columnconfigure(1, weight=1)
-            ctk.CTkLabel(row, text=label_text, font=("Arial", 12, "bold"), anchor="w", width=180).grid(row=0, column=0, sticky="w")
-            entry = ctk.CTkEntry(row, height=45)
+            ctk.CTkLabel(row, text=label_text, font=("Outfit", 14), text_color="#A1A9B8", anchor="w", width=140).grid(row=0, column=0, sticky="w", padx=(10,0))
+            entry = ctk.CTkEntry(row, height=45, fg_color="#1A1D2D", border_color="#2A2F45", text_color="white", font=("Inter", 14), corner_radius=8)
             entry.insert(0, default_value)
-            if secret: entry.configure(show="*")
-            entry.grid(row=0, column=1, sticky="ew", padx=(20, 50))
+            if secret: entry.configure(show="•")
+            entry.grid(row=0, column=1, sticky="ew", padx=(10, 40))
             return entry
 
-        self.db_tech = ctk.CTkComboBox(form_scroll, values=["MySQL / MariaDB"], height=45)
-        self.db_tech.pack(pady=10)
+        combo_row = ctk.CTkFrame(form_scroll, fg_color="transparent")
+        combo_row.pack(fill="x", pady=(20, 10))
+        combo_row.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(combo_row, text="Database Type:", font=("Outfit", 14), text_color="#A1A9B8", anchor="w", width=140).grid(row=0, column=0, sticky="w", padx=(10,0))
+        
+        self.db_tech = ctk.CTkComboBox(combo_row, values=["MySQL / MariaDB"], height=45, fg_color="#1A1D2D", border_color="#2A2F45", text_color="white", dropdown_fg_color="#151923", dropdown_text_color="white", font=("Inter", 14), button_color="#2A2F45", button_hover_color="#3A3F55", corner_radius=8)
+        self.db_tech.grid(row=0, column=1, sticky="ew", padx=(10, 40))
         self.db_tech.set("MySQL / MariaDB")
         
         self.host = add_field(form_scroll, "Host IP:", "localhost")
@@ -200,7 +205,7 @@ class ERPWizard(ctk.CTkFrame):
                 ent.pack(side="left", padx=10)
 
         create_group("Student Data", self.schema_results["tbl_student"], 
-                     ["col_student_id", "col_name", "join_branch", "col_year", "col_email", "col_p_phone", "col_p_email"], 
+                     ["join_student", "col_name", "join_branch", "col_year", "col_email", "col_p_phone", "col_p_email"], 
                      COLORS["accent"])
                      
         create_group("Academic Data", self.schema_results["tbl_academic"], 
@@ -219,7 +224,7 @@ class ERPWizard(ctk.CTkFrame):
         a_tbl = self.field_vars["Academic Data"]["_table"].get()
         b_tbl = self.field_vars["Branch Data"]["_table"].get()
         
-        s_id = self.field_vars["Student Data"]["col_student_id"].get()
+        s_id = self.field_vars["Student Data"]["join_student"].get()
         s_name = self.field_vars["Student Data"]["col_name"].get()
         s_join = self.field_vars["Academic Data"]["join_student"].get()
         
@@ -301,7 +306,7 @@ class ERPWizard(ctk.CTkFrame):
             })
             
             ModernMessagebox("Success", "ERP Schema Detected & Saved Successfully!", "success")
-            self.dash.on_show()
+            self.controller.show_frame("DashboardScreen")
         else:
             self.btn_action.configure(state="normal", text="VALIDATE & SAVE CONFIG")
             ModernMessagebox("Save Failed", "Could not save configuration to CentralAuth.", "error")

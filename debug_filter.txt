@@ -1,2 +1,0 @@
-Branch: 1, Year: 2nd Year, Students: 38
-First student keys: ['id', 'name', 'year', 'avg_attendance', 'avg_marks', 'backlogs', 'lab_performance', 'mid_exam_score', 'cgpa', 'assignment_marks', 'email']

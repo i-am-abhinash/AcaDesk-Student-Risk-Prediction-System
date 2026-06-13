@@ -13,6 +13,8 @@ if root_dir not in sys.path:
 from ui.styles import COLORS, FONTS, DIMS
 from logic.risk_engine import AdvancedRiskPredictor
 from logic.db_handler import DBHandler
+from logic.central_auth import CentralAuth
+from logic.intervention_engine import InterventionEngine
 
 class InsightCenter(ctk.CTkFrame):
     def __init__(self, parent, controller):
@@ -36,19 +38,19 @@ class InsightCenter(ctk.CTkFrame):
         # Header Section
         hdr = ctk.CTkFrame(self.scroll, fg_color="transparent")
         hdr.pack(fill="x", pady=(0, 15))
-        ctk.CTkLabel(hdr, text="ACADEMIC RISK INTELLIGENCE LABORATORY", font=("Arial", 18, "bold"), text_color=COLORS["accent"]).pack(side="left")
+        ctk.CTkLabel(hdr, text="ACADEMIC RISK INTELLIGENCE LABORATORY", font=FONTS["h2"], text_color=COLORS["accent"]).pack(side="left")
         
         load_f = ctk.CTkFrame(hdr, fg_color="transparent")
         load_f.pack(side="right")
         self.search_var = ctk.StringVar()
         self.search_ent = ctk.CTkEntry(load_f, placeholder_text="Load Student ID...", width=200, textvariable=self.search_var)
         self.search_ent.pack(side="left", padx=5)
-        ctk.CTkButton(load_f, text="LOAD DATA", width=90, fg_color="#222", font=("Arial", 11, "bold"), command=self.load_real_student).pack(side="left")
+        ctk.CTkButton(load_f, text="LOAD DATA", width=90, fg_color="#222", font=FONTS["caption"], command=self.load_real_student).pack(side="left")
 
         # Student Context Panel
         self.context_card = ctk.CTkFrame(self.scroll, fg_color="#1a1a1a", corner_radius=8, border_width=1, border_color="#333")
         self.context_card.pack(fill="x", pady=(0, 10))
-        self.lbl_context = ctk.CTkLabel(self.context_card, text="No Student Loaded. Adjust sliders below for global scenario simulation.", font=("Arial", 12), text_color="#888")
+        self.lbl_context = ctk.CTkLabel(self.context_card, text="No Student Loaded. Adjust sliders below for global scenario simulation.", font=FONTS["body"], text_color="#888")
         self.lbl_context.pack(padx=20, pady=12, anchor="w")
 
         # Two Column Main Layout (40% / 60%)
@@ -66,7 +68,7 @@ class InsightCenter(ctk.CTkFrame):
         # --- LEFT COLUMN (40%): SCENARIO BUILDER ---
         builder_card = ctk.CTkFrame(left_col, fg_color="#141414", corner_radius=8, border_width=1, border_color="#222")
         builder_card.pack(fill="both", expand=True, pady=(0, 10))
-        ctk.CTkLabel(builder_card, text="STUDENT PARAMETER LAB BUILDER", font=("Arial", 12, "bold"), text_color=COLORS["accent"]).pack(anchor="w", padx=15, pady=(15, 10))
+        ctk.CTkLabel(builder_card, text="STUDENT PARAMETER LAB BUILDER", font=FONTS["body"], text_color=COLORS["accent"]).pack(anchor="w", padx=15, pady=(15, 10))
         
         self.slider_groups = {
             "Attendance & Behaviour": [
@@ -89,7 +91,7 @@ class InsightCenter(ctk.CTkFrame):
         }
         
         for section, params in self.slider_groups.items():
-            sec_lbl = ctk.CTkLabel(builder_card, text=section.upper(), font=("Arial", 11, "bold"), text_color="#777")
+            sec_lbl = ctk.CTkLabel(builder_card, text=section.upper(), font=FONTS["caption"], text_color="#777")
             sec_lbl.pack(anchor="w", padx=15, pady=(12, 4))
             
             for key, label, v_min, v_max, v_init, avg, safe, thresh, unit, is_float in params:
@@ -98,9 +100,9 @@ class InsightCenter(ctk.CTkFrame):
                 
                 top_row = ctk.CTkFrame(sf, fg_color="transparent")
                 top_row.pack(fill="x")
-                ctk.CTkLabel(top_row, text=label, font=("Arial", 12, "bold"), text_color="white").pack(side="left")
+                ctk.CTkLabel(top_row, text=label, font=FONTS["body"], text_color="white").pack(side="left")
                 
-                val_lbl = ctk.CTkLabel(top_row, text=f"{v_init} {unit}", font=("Arial", 12, "bold"), text_color=COLORS["accent"])
+                val_lbl = ctk.CTkLabel(top_row, text=f"{v_init} {unit}", font=FONTS["body"], text_color=COLORS["accent"])
                 val_lbl.pack(side="right")
                 self.value_labels[key] = val_lbl
                 
@@ -114,9 +116,9 @@ class InsightCenter(ctk.CTkFrame):
                 bot_row.pack(fill="x")
                 
                 meta_txt = f"College Avg: {avg}  |  Safe Range: {safe}  |  Risk Threshold: {thresh}"
-                ctk.CTkLabel(bot_row, text=meta_txt, font=("Arial", 10), text_color="#666").pack(side="left")
+                ctk.CTkLabel(bot_row, text=meta_txt, font=FONTS["badge"], text_color="#666").pack(side="left")
                 
-                contrib_lbl = ctk.CTkLabel(bot_row, text="Current Impact: +0.0 Points", font=("Arial", 10, "bold"), text_color="#888")
+                contrib_lbl = ctk.CTkLabel(bot_row, text="Current Impact: +0.0 Points", font=FONTS["badge"], text_color="#888")
                 contrib_lbl.pack(side="right")
                 self.contrib_labels[key] = contrib_lbl
                 
@@ -133,18 +135,18 @@ class InsightCenter(ctk.CTkFrame):
         pred_card = ctk.CTkFrame(right_col, fg_color="#0c1220", corner_radius=8, border_width=1, border_color="#1e3a5f")
         pred_card.pack(fill="x", pady=(0, 10))
         
-        ctk.CTkLabel(pred_card, text="CURRENT PREDICTION", font=("Arial", 12, "bold"), text_color="#4B7CB3").pack(anchor="w", padx=20, pady=(15, 5))
+        ctk.CTkLabel(pred_card, text="CURRENT PREDICTION", font=FONTS["body"], text_color="#4B7CB3").pack(anchor="w", padx=20, pady=(15, 5))
         
         res_row = ctk.CTkFrame(pred_card, fg_color="transparent")
         res_row.pack(fill="x", padx=20, pady=(0, 5))
         
-        self.lbl_level = ctk.CTkLabel(res_row, text="LOW RISK", font=("Arial", 18, "bold"), text_color=COLORS["success"])
+        self.lbl_level = ctk.CTkLabel(res_row, text="LOW RISK", font=FONTS["h2"], text_color=COLORS["success"])
         self.lbl_level.pack(side="left")
         
-        self.lbl_score = ctk.CTkLabel(res_row, text="12 / 100", font=("Arial", 18, "bold"), text_color="white")
+        self.lbl_score = ctk.CTkLabel(res_row, text="12 / 100", font=FONTS["h2"], text_color="white")
         self.lbl_score.pack(side="left", padx=20)
         
-        self.lbl_conf = ctk.CTkLabel(res_row, text="Confidence: 92%", font=("Arial", 12), text_color="#4B6A8A")
+        self.lbl_conf = ctk.CTkLabel(res_row, text="Confidence: 92%", font=FONTS["body"], text_color="#4B6A8A")
         self.lbl_conf.pack(side="right")
 
         self.gauge_frame = ctk.CTkFrame(pred_card, fg_color="transparent", height=40)
@@ -155,7 +157,7 @@ class InsightCenter(ctk.CTkFrame):
         # Why the model made this decision
         reason_card = ctk.CTkFrame(right_col, fg_color="#141414", corner_radius=8, border_width=1, border_color="#222")
         reason_card.pack(fill="x", pady=(0, 10))
-        ctk.CTkLabel(reason_card, text="WHY THE MODEL MADE THIS DECISION", font=("Arial", 12, "bold"), text_color=COLORS["accent"]).pack(anchor="w", padx=20, pady=(15, 10))
+        ctk.CTkLabel(reason_card, text="WHY THE MODEL MADE THIS DECISION", font=FONTS["body"], text_color=COLORS["accent"]).pack(anchor="w", padx=20, pady=(15, 10))
         
         self.reason_scroll = ctk.CTkFrame(reason_card, fg_color="transparent")
         self.reason_scroll.pack(fill="x", padx=20, pady=(0, 15))
@@ -163,7 +165,7 @@ class InsightCenter(ctk.CTkFrame):
         # Historical Pattern Analysis
         history_card = ctk.CTkFrame(right_col, fg_color="#141414", corner_radius=8, border_width=1, border_color="#222")
         history_card.pack(fill="x", pady=(0, 10))
-        ctk.CTkLabel(history_card, text="HISTORICAL PATTERN ANALYSIS", font=("Arial", 12, "bold"), text_color="#FFD600").pack(anchor="w", padx=20, pady=(15, 10))
+        ctk.CTkLabel(history_card, text="HISTORICAL PATTERN ANALYSIS", font=FONTS["body"], text_color="#FFD600").pack(anchor="w", padx=20, pady=(15, 10))
         
         self.history_scroll = ctk.CTkFrame(history_card, fg_color="transparent")
         self.history_scroll.pack(fill="x", padx=20, pady=(0, 15))
@@ -171,7 +173,7 @@ class InsightCenter(ctk.CTkFrame):
         # Intervention Forecast
         forecast_card = ctk.CTkFrame(right_col, fg_color="#141414", corner_radius=8, border_width=1, border_color="#222")
         forecast_card.pack(fill="x", pady=(0, 10))
-        ctk.CTkLabel(forecast_card, text="INTERVENTION FORECAST", font=("Arial", 12, "bold"), text_color="#4ADE80").pack(anchor="w", padx=20, pady=(15, 10))
+        ctk.CTkLabel(forecast_card, text="INTERVENTION FORECAST", font=FONTS["body"], text_color="#4ADE80").pack(anchor="w", padx=20, pady=(15, 10))
         
         self.forecast_scroll = ctk.CTkFrame(forecast_card, fg_color="transparent")
         self.forecast_scroll.pack(fill="x", padx=20, pady=(0, 15))
@@ -179,7 +181,7 @@ class InsightCenter(ctk.CTkFrame):
         # Recommendations
         rec_card = ctk.CTkFrame(right_col, fg_color="#141414", corner_radius=8, border_width=1, border_color="#222")
         rec_card.pack(fill="x", pady=(0, 10))
-        ctk.CTkLabel(rec_card, text="PRIORITY RECOMMENDATIONS", font=("Arial", 12, "bold"), text_color="#4ADE80").pack(anchor="w", padx=20, pady=(15, 10))
+        ctk.CTkLabel(rec_card, text="PRIORITY RECOMMENDATIONS", font=FONTS["body"], text_color="#4ADE80").pack(anchor="w", padx=20, pady=(15, 10))
         
         self.rec_scroll = ctk.CTkFrame(rec_card, fg_color="transparent")
         self.rec_scroll.pack(fill="x", padx=20, pady=(0, 15))
@@ -196,7 +198,7 @@ class InsightCenter(ctk.CTkFrame):
         
         for pct in [0, 25, 50, 75, 100]:
             x = 10 + (pct / 100) * (width - 20)
-            self.gauge_canvas.create_text(x, y_pos - 10, text=str(pct), fill="#888", font=("Arial", 8))
+            self.gauge_canvas.create_text(x, y_pos - 10, text=str(pct), fill="#888", font=FONTS["badge"])
             self.gauge_canvas.create_line(x, y_pos - 3, x, y_pos + 3, fill="#888")
             
         marker_x = 10 + (min(100, max(0, score)) / 100) * (width - 20)
@@ -213,7 +215,9 @@ class InsightCenter(ctk.CTkFrame):
         
         score = report.get("score", 0.0)
         level = report.get("level", "Low")
-        conf = report.get("confidence", "92%")
+        conf = report.get("confidence", 92)
+        if isinstance(conf, (int, float)):
+            conf = f"{conf}%"
         
         self.lbl_score.configure(text=f"{score:.0f} / 100")
         color = COLORS["danger"] if score >= 58 else (COLORS["warning"] if score >= 28 else COLORS["success"])
@@ -239,7 +243,7 @@ class InsightCenter(ctk.CTkFrame):
             if key in self.contrib_labels:
                 clr = COLORS["danger"] if val > 0 else (COLORS["success"] if val < 0 else "#666")
                 prefix = "+" if val > 0 else ""
-                self.contrib_labels[key].configure(text=f"Current Impact: {prefix}{val:.1f} Points", text_color=clr)
+                self.contrib_labels[key].configure(text=f"Current Impact: {prefix}{val:.0f}%", text_color=clr)
 
         self.update_reasoning_panel(contribs)
         self.update_history_panel(data)
@@ -263,10 +267,10 @@ class InsightCenter(ctk.CTkFrame):
             lbl_f = ctk.CTkFrame(row, fg_color="transparent")
             lbl_f.pack(fill="x")
             
-            ctk.CTkLabel(lbl_f, text=name, font=("Arial", 12, "bold"), text_color="#ccc").pack(side="left")
+            ctk.CTkLabel(lbl_f, text=name, font=FONTS["body"], text_color="#ccc").pack(side="left")
             prefix = "+" if val > 0 else ""
             color = COLORS["danger"] if val > 0 else (COLORS["success"] if val < 0 else "#888")
-            ctk.CTkLabel(lbl_f, text=f"{prefix}{val:.1f} Points", font=("Arial", 12, "bold"), text_color=color).pack(side="right")
+            ctk.CTkLabel(lbl_f, text=f"{prefix}{val:.0f}%", font=FONTS["body"], text_color=color).pack(side="right")
             
             pct = (abs(val) / total_abs) * 100
             bar_f = ctk.CTkFrame(row, fg_color="transparent", height=10)
@@ -276,12 +280,16 @@ class InsightCenter(ctk.CTkFrame):
             bar_bg.pack(side="left", fill="x", expand=True, padx=(0, 10))
             bar_bg.pack_propagate(False)
             
-            # Draw the filled portion of the bar
             if pct > 0:
                 bar_fg = ctk.CTkFrame(bar_bg, fg_color=color, height=8, corner_radius=4)
                 bar_fg.place(relx=0, rely=0, relwidth=min(1.0, pct/100.0), relheight=1.0)
             
-            ctk.CTkLabel(bar_f, text=f"{pct:.0f}%", font=("Arial", 10), text_color="#888", width=30).pack(side="right")
+            ctk.CTkLabel(bar_f, text=f"{pct:.0f}%", font=FONTS["badge"], text_color="#888", width=30).pack(side="right")
+
+        # NLP Explanation text at the bottom
+        nlp_text = report.get("nlp_explanation", "") if 'report' in locals() else (self.current_report.get("nlp_explanation", "") if getattr(self, 'current_report', None) else "")
+        if nlp_text:
+            ctk.CTkLabel(self.reason_scroll, text=nlp_text, font=FONTS["caption"], text_color="#aaa", wraplength=280).pack(pady=(10, 0), anchor="w")
 
     def update_history_panel(self, data):
         for w in self.history_scroll.winfo_children(): w.destroy()
@@ -313,10 +321,10 @@ class InsightCenter(ctk.CTkFrame):
             
             top = ctk.CTkFrame(card, fg_color="transparent")
             top.pack(fill="x", padx=15, pady=(10, 2))
-            ctk.CTkLabel(top, text=title, font=("Arial", 11, "bold"), text_color="white").pack(side="left")
-            ctk.CTkLabel(top, text=trend, font=("Arial", 11, "bold"), text_color="#aaa").pack(side="right")
+            ctk.CTkLabel(top, text=title, font=FONTS["caption"], text_color="white").pack(side="left")
+            ctk.CTkLabel(top, text=trend, font=FONTS["caption"], text_color="#aaa").pack(side="right")
             
-            ctk.CTkLabel(card, text=f"Detect: {insight}", font=("Arial", 11), text_color=color).pack(anchor="w", padx=15, pady=(0, 10))
+            ctk.CTkLabel(card, text=f"Detect: {insight}", font=FONTS["caption"], text_color=color).pack(anchor="w", padx=15, pady=(0, 10))
 
     def update_forecast_panel(self, data, current_score):
         for w in self.forecast_scroll.winfo_children(): w.destroy()
@@ -346,16 +354,16 @@ class InsightCenter(ctk.CTkFrame):
             
             top = ctk.CTkFrame(card, fg_color="transparent")
             top.pack(fill="x", padx=15, pady=(10, 5))
-            ctk.CTkLabel(top, text=f"Current Risk: {current_score:.0f}", font=("Arial", 11), text_color="#888").pack(side="left")
+            ctk.CTkLabel(top, text=f"Current Risk: {current_score:.0f}", font=FONTS["caption"], text_color="#888").pack(side="left")
             
             mid = ctk.CTkFrame(card, fg_color="transparent")
             mid.pack(fill="x", padx=15, pady=2)
-            ctk.CTkLabel(mid, text=act, font=("Arial", 12, "bold"), text_color="white").pack(side="left")
+            ctk.CTkLabel(mid, text=act, font=FONTS["body"], text_color="white").pack(side="left")
             
             bot = ctk.CTkFrame(card, fg_color="transparent")
             bot.pack(fill="x", padx=15, pady=(5, 10))
-            ctk.CTkLabel(bot, text=f"New Risk: {new_score:.0f}", font=("Arial", 12, "bold"), text_color="#4ADE80").pack(side="left")
-            ctk.CTkLabel(bot, text=f"Improvement: {diff:.0f} Points", font=("Arial", 11, "bold"), text_color="#4ADE80").pack(side="right")
+            ctk.CTkLabel(bot, text=f"New Risk: {new_score:.0f}", font=FONTS["body"], text_color="#4ADE80").pack(side="left")
+            ctk.CTkLabel(bot, text=f"Improvement: {diff:.0f} Points", font=FONTS["caption"], text_color="#4ADE80").pack(side="right")
 
     def update_recommendations_panel(self, report):
         for w in self.rec_scroll.winfo_children(): w.destroy()
@@ -365,8 +373,8 @@ class InsightCenter(ctk.CTkFrame):
         if nlg_text:
             nlg_card = ctk.CTkFrame(self.rec_scroll, fg_color="#1a1a1a", corner_radius=6, border_width=1, border_color="#333")
             nlg_card.pack(fill="x", pady=(0, 10))
-            ctk.CTkLabel(nlg_card, text="AI Analysis Summary", font=("Arial", 11, "bold"), text_color="#00E5FF").pack(anchor="w", padx=15, pady=(10, 2))
-            ctk.CTkLabel(nlg_card, text=nlg_text, font=("Arial", 11), text_color="#ccc", wraplength=420, justify="left").pack(anchor="w", padx=15, pady=(2, 10))
+            ctk.CTkLabel(nlg_card, text="AI Analysis Summary", font=FONTS["caption"], text_color="#00E5FF").pack(anchor="w", padx=15, pady=(10, 2))
+            ctk.CTkLabel(nlg_card, text=nlg_text, font=FONTS["caption"], text_color="#ccc", wraplength=420, justify="left").pack(anchor="w", padx=15, pady=(2, 10))
             
         # 2. Recommendations
         recs = report.get("recommendations", [])
@@ -397,7 +405,7 @@ class InsightCenter(ctk.CTkFrame):
             top_row.pack(fill="x", padx=15, pady=(10, 2))
             
             p_color = COLORS["danger"] if pri == 1 else (COLORS["warning"] if pri == 2 else COLORS["success"])
-            ctk.CTkLabel(top_row, text=f"Priority {pri}", font=("Arial", 10, "bold"), text_color=p_color).pack(side="left")
+            ctk.CTkLabel(top_row, text=f"Priority {pri}", font=FONTS["badge"], text_color=p_color).pack(side="left")
             
             if student_id:
                 # Add action tracking dropdown
@@ -405,19 +413,43 @@ class InsightCenter(ctk.CTkFrame):
                     def status_changed(new_status):
                         from logic.intervention_engine import InterventionEngine
                         ie = InterventionEngine()
-                        # Simple fire-and-forget save (creates a new tracking record for this action)
-                        ie.save_intervention(college, student_id, faculty_user, rlevel, dom, action_name, pri_level, new_status)
+                        
+                        # Prepare current metrics
+                        curr_metrics = {
+                            "att": data.get("attendance", data.get("avg_attendance", 0)),
+                            "marks": data.get("marks", data.get("avg_marks", 0)),
+                            "bkl": data.get("backlogs", 0)
+                        }
+                        
+                        # Find if record exists
+                        from logic.central_auth import CentralAuth
+                        conn = CentralAuth()._get_conn()
+                        record_id = None
+                        if conn:
+                            try:
+                                cursor = conn.cursor(dictionary=True)
+                                cursor.execute("SELECT id FROM interventions WHERE student_id=%s AND recommended_action=%s ORDER BY id DESC LIMIT 1", (student_id, action_name))
+                                row = cursor.fetchone()
+                                if row:
+                                    record_id = row['id']
+                            finally:
+                                conn.close()
+                                
+                        if record_id:
+                            ie.update_intervention_status(record_id, new_status, after_metrics=curr_metrics if new_status == "Completed" else None)
+                        else:
+                            ie.save_intervention(college, student_id, faculty_user, rlevel, dom, action_name, pri_level, new_status, before_metrics=curr_metrics)
                     return status_changed
                 
                 track_var = ctk.StringVar(value="Planned")
                 tracker = ctk.CTkOptionMenu(top_row, values=["Planned", "In Progress", "Completed"], 
-                                           variable=track_var, width=110, height=20, font=("Arial", 10),
+                                           variable=track_var, width=110, height=20, font=FONTS["badge"],
                                            command=make_cmd())
                 tracker.pack(side="right")
             
-            ctk.CTkLabel(card, text=act, font=("Arial", 13, "bold"), text_color="white", wraplength=400, justify="left").pack(anchor="w", padx=15, pady=2)
-            ctk.CTkLabel(card, text=f"Rationale: {rsn}", font=("Arial", 11), text_color="#aaa", wraplength=400, justify="left").pack(anchor="w", padx=15, pady=(2, 2))
-            ctk.CTkLabel(card, text=f"Expected: {out}", font=("Arial", 11, "bold"), text_color="#4ADE80", wraplength=400, justify="left").pack(anchor="w", padx=15, pady=(0, 10))
+            ctk.CTkLabel(card, text=act, font=FONTS["h3"], text_color="white", wraplength=400, justify="left").pack(anchor="w", padx=15, pady=2)
+            ctk.CTkLabel(card, text=f"Rationale: {rsn}", font=FONTS["caption"], text_color="#aaa", wraplength=400, justify="left").pack(anchor="w", padx=15, pady=(2, 2))
+            ctk.CTkLabel(card, text=f"Expected: {out}", font=FONTS["caption"], text_color="#4ADE80", wraplength=400, justify="left").pack(anchor="w", padx=15, pady=(0, 10))
 
     def load_real_student(self):
         reg = self.search_var.get().strip()
@@ -467,7 +499,7 @@ class InsightCenter(ctk.CTkFrame):
             else:
                 self.context_card.configure(fg_color="#0c1220", border_color="#1e3a5f")
                 
-            self.lbl_context.configure(text=context_text, text_color="white", font=("Arial", 14, "bold"))
+            self.lbl_context.configure(text=context_text, text_color="white", font=FONTS["h3"])
             
             self.ignore_updates = False
             self.run_prediction()
@@ -507,7 +539,9 @@ class RiskIntelligenceDashboard(ctk.CTkFrame):
         report = self.predictor.analyze(data)
         lvl = report.get('level', 'Low')
         score_val = report.get('score', 0.0)
-        conf = report.get('confidence', '90%')
+        conf = report.get('confidence', 90)
+        if isinstance(conf, (int, float)):
+            conf = f"{conf}%"
         
         if lvl == "High":
             r_color = COLORS["danger"]
@@ -526,28 +560,28 @@ class RiskIntelligenceDashboard(ctk.CTkFrame):
         left_h = ctk.CTkFrame(header_card, fg_color="transparent")
         left_h.pack(side="left", padx=20, pady=15, fill="both", expand=True)
         
-        ctk.CTkLabel(left_h, text=data.get('display_name', 'Unknown').upper(), font=("Arial", 22, "bold"), text_color="white").pack(anchor="w")
+        ctk.CTkLabel(left_h, text=data.get('display_name', 'Unknown').upper(), font=FONTS["h1"], text_color="white").pack(anchor="w")
         
         lbl_sub = f"Reg No: {data.get('display_reg_no', 'N/A')}  |  Dept: {data.get('branch_name', 'N/A')}  |  Year: {data.get('current_year', 'N/A')}"
-        ctk.CTkLabel(left_h, text=lbl_sub, font=("Arial", 12), text_color="#aaa").pack(anchor="w", pady=(4, 6))
+        ctk.CTkLabel(left_h, text=lbl_sub, font=FONTS["body"], text_color="#aaa").pack(anchor="w", pady=(4, 6))
         
         # Contact Information
         contact_txt = f"📞 Parent Contact: {data.get('parent_phone', 'N/A')}  |  📧 Email: {data.get('email', 'N/A')}"
-        ctk.CTkLabel(left_h, text=contact_txt, font=("Arial", 11), text_color="#777").pack(anchor="w")
+        ctk.CTkLabel(left_h, text=contact_txt, font=FONTS["caption"], text_color="#777").pack(anchor="w")
         
         # Right Actions & Scores
         right_h = ctk.CTkFrame(header_card, fg_color="transparent")
         right_h.pack(side="right", padx=20, pady=15)
         
-        ctk.CTkLabel(right_h, text=f"RISK SCORE: {score_val:.1f} / 100", font=("Arial", 18, "bold"), text_color=r_color).pack(anchor="e")
-        ctk.CTkLabel(right_h, text=f"{lvl.upper()} RISK CATEGORY", font=("Arial", 12, "bold"), text_color=r_color).pack(anchor="e", pady=(2, 2))
-        ctk.CTkLabel(right_h, text=f"Prediction Confidence: {conf}", font=("Arial", 11), text_color="#888").pack(anchor="e", pady=(0, 10))
+        ctk.CTkLabel(right_h, text=f"RISK SCORE: {score_val:.1f} / 100", font=FONTS["h2"], text_color=r_color).pack(anchor="e")
+        ctk.CTkLabel(right_h, text=f"{lvl.upper()} RISK CATEGORY", font=FONTS["body"], text_color=r_color).pack(anchor="e", pady=(2, 2))
+        ctk.CTkLabel(right_h, text=f"Prediction Confidence: {conf}", font=FONTS["caption"], text_color="#888").pack(anchor="e", pady=(0, 10))
         
         def notify_parent():
             from ui.dashboard import ModernMessagebox
             ModernMessagebox("Notification Sent", f"Risk alert notification dispatched to parent contact: {data.get('parent_phone', 'N/A')}", "success")
             
-        notify_btn = ctk.CTkButton(right_h, text="📞 NOTIFY PARENT", font=("Arial", 11, "bold"), fg_color=COLORS["danger"], text_color="white", height=28, command=notify_parent)
+        notify_btn = ctk.CTkButton(right_h, text="📞 NOTIFY PARENT", font=FONTS["caption"], fg_color=COLORS["danger"], text_color="white", height=28, command=notify_parent)
         notify_btn.pack(anchor="e")
 
         # Column Layout for Content (Left: Assessment & Trends, Right: Drivers & Interventions)
@@ -566,7 +600,7 @@ class RiskIntelligenceDashboard(ctk.CTkFrame):
         assess_card = ctk.CTkFrame(left_pane, fg_color="#121212", corner_radius=8, border_width=1, border_color="#222")
         assess_card.pack(fill="x", pady=(0, 10))
         
-        ctk.CTkLabel(assess_card, text="🧠 AI RISK ASSESSMENT", font=("Arial", 12, "bold"), text_color="#FFD600").pack(anchor="w", padx=15, pady=(10, 5))
+        ctk.CTkLabel(assess_card, text="🧠 AI RISK ASSESSMENT", font=FONTS["body"], text_color="#FFD600").pack(anchor="w", padx=15, pady=(10, 5))
         
         # Build explanation from actual feature values
         att_pct = data.get('attendance_pct', 0)
@@ -577,10 +611,10 @@ class RiskIntelligenceDashboard(ctk.CTkFrame):
         bl_txt = f"Active Backlogs: {int(float(backlogs))} (Threshold: 0)"
         cgpa_txt = f"CGPA: {float(cgpa)} (Threshold: 5.5)"
         
-        ctk.CTkLabel(assess_card, text=f"Key Inputs:  {att_txt}   |   {bl_txt}   |   {cgpa_txt}", font=("Arial", 11, "bold"), text_color="#ccc").pack(anchor="w", padx=15, pady=(0, 5))
+        ctk.CTkLabel(assess_card, text=f"Key Inputs:  {att_txt}   |   {bl_txt}   |   {cgpa_txt}", font=FONTS["caption"], text_color="#ccc").pack(anchor="w", padx=15, pady=(0, 5))
         
         explanation = report.get('explanation', f"The model evaluated the student as {lvl} Risk primarily based on these parameters.")
-        ctk.CTkLabel(assess_card, text=explanation, wraplength=500, justify="left", font=("Arial", 11), text_color="#ddd").pack(anchor="w", padx=15, pady=(0, 15))
+        ctk.CTkLabel(assess_card, text=explanation, wraplength=500, justify="left", font=FONTS["caption"], text_color="#ddd").pack(anchor="w", padx=15, pady=(0, 15))
 
         # ----------------------------------------------------
         # 3. HISTORICAL TREND ANALYSIS (Left Pane)
@@ -588,7 +622,7 @@ class RiskIntelligenceDashboard(ctk.CTkFrame):
         trend_card = ctk.CTkFrame(left_pane, fg_color="#121212", corner_radius=8, border_width=1, border_color="#222")
         trend_card.pack(fill="x", pady=(0, 10))
         
-        ctk.CTkLabel(trend_card, text="📈 HISTORICAL TREND ANALYSIS", font=("Arial", 12, "bold"), text_color=COLORS["accent"]).pack(anchor="w", padx=15, pady=(10, 5))
+        ctk.CTkLabel(trend_card, text="📈 HISTORICAL TREND ANALYSIS", font=FONTS["body"], text_color=COLORS["accent"]).pack(anchor="w", padx=15, pady=(10, 5))
         
         trend_vals = report.get('trend', [])
         if trend_vals:
@@ -616,7 +650,7 @@ class RiskIntelligenceDashboard(ctk.CTkFrame):
             except Exception:
                 ctk.CTkLabel(trend_card, text="Trend chart visualization offline", text_color="gray").pack(pady=10)
         else:
-            ctk.CTkLabel(trend_card, text="No historical semester records found in ERP database.", font=("Arial", 11), text_color="#777").pack(anchor="w", padx=15, pady=(0, 15))
+            ctk.CTkLabel(trend_card, text="No historical semester records found in ERP database.", font=FONTS["caption"], text_color="#777").pack(anchor="w", padx=15, pady=(0, 15))
 
         # ----------------------------------------------------
         # 4. STUDENT ACTIVITY TIMELINE (Left Pane)
@@ -624,23 +658,156 @@ class RiskIntelligenceDashboard(ctk.CTkFrame):
         timeline_card = ctk.CTkFrame(left_pane, fg_color="#121212", corner_radius=8, border_width=1, border_color="#222")
         timeline_card.pack(fill="x", pady=(0, 10))
         
-        ctk.CTkLabel(timeline_card, text="📅 STUDENT ACTIVITY TIMELINE", font=("Arial", 12, "bold"), text_color="#888").pack(anchor="w", padx=15, pady=(10, 5))
+        ctk.CTkLabel(timeline_card, text="📅 STUDENT ACTIVITY TIMELINE", font=FONTS["body"], text_color="#888").pack(anchor="w", padx=15, pady=(10, 5))
         
-        # Expanded dynamic timeline activities based on profile
-        activities = [
-            ("Today", f"Risk updated to {score_val:.1f} ({lvl} Risk)"),
-            ("3 Days Ago", f"Attendance recorded at {data.get('attendance_pct', 'N/A')}%"),
-            ("1 Week Ago", f"Faculty observation note added"),
-            ("2 Weeks Ago", "Parent notification alert dispatched"),
-            ("1 Month Ago", f"Internal assessments finalized (GPA: {data.get('cgpa', 'N/A')})")
-        ]
-        for date, desc in activities:
+        # Dynamic Timeline Rendering (Interventions + Notes)
+        student_id = data.get('id', data.get('student_id', ''))
+        college_name = self.controller.shared_data.get("college_name", "")
+        
+        ca = CentralAuth()
+        ie = InterventionEngine()
+        
+        raw_notes = ca.get_notes_for_student(student_id)
+        raw_interventions = ie.get_database_interventions(college_name, student_id)
+        
+        timeline_events = []
+        for n in raw_notes:
+            st = n.get('note_status', 'ACTIVE')
+            if st == 'CRITICAL': c = "#FF5555"
+            elif st == 'FOLLOW_UP': c = "yellow"
+            elif st == 'ACTIVE': c = "#4ADE80"
+            else: c = "cyan"
+            
+            timeline_events.append({
+                "date": n.get('created_at'),
+                "desc": f"Note [{st}]: {n.get('note_text', '')[:30]}...",
+                "type": "Note",
+                "color": c
+            })
+            
+        for iv in raw_interventions:
+            timeline_events.append({
+                "date": iv.get('date_created'),
+                "desc": f"Intervention: {iv.get('recommendation_text', '')}",
+                "type": "Action"
+            })
+            
+        # Sort chronologically, newest first
+        import datetime
+        def parse_dt(d):
+            if isinstance(d, datetime.datetime): return d
+            try: return datetime.datetime.strptime(str(d), "%Y-%m-%d %H:%M:%S")
+            except: return datetime.datetime.min
+            
+        timeline_events.sort(key=lambda x: parse_dt(x['date']), reverse=True)
+        
+        if not timeline_events:
+            activities = [("Today", "Risk score initialized", COLORS["accent"])]
+        else:
+            activities = []
+            for ev in timeline_events[:5]:
+                dt = parse_dt(ev['date'])
+                if dt == datetime.datetime.min: d_str = "Past"
+                else: d_str = dt.strftime("%b %d, %Y")
+                activities.append((d_str, ev['desc'], ev.get('color', COLORS["accent"])))
+                
+        for date, desc, color in activities:
             row = ctk.CTkFrame(timeline_card, fg_color="transparent")
             row.pack(fill="x", padx=15, pady=4)
-            ctk.CTkLabel(row, text=date, font=("Arial", 10, "bold"), text_color=COLORS["accent"], width=90, anchor="w").pack(side="left")
-            ctk.CTkLabel(row, text=desc, font=("Arial", 11), text_color="#ddd").pack(side="left")
+            ctk.CTkLabel(row, text=date, font=FONTS["badge"], text_color=color, width=90, anchor="w").pack(side="left")
+            ctk.CTkLabel(row, text=desc, font=FONTS["caption"], text_color="#ddd").pack(side="left")
             
         ctk.CTkFrame(timeline_card, height=10, fg_color="transparent").pack()
+
+        # ----------------------------------------------------
+        # 4.1 FACULTY NOTES HISTORY (Left Pane)
+        # ----------------------------------------------------
+        history_card = ctk.CTkFrame(left_pane, fg_color="#121212", corner_radius=8, border_width=1, border_color="#222")
+        history_card.pack(fill="x", pady=(0, 10))
+        
+        ctk.CTkLabel(history_card, text="📝 NOTE HISTORY", font=FONTS["body"], text_color="#FFD600").pack(anchor="w", padx=15, pady=(10, 5))
+        
+        # Embedded Note History Feed
+        history_frame = ctk.CTkScrollableFrame(history_card, height=100, fg_color="transparent")
+        history_frame.pack(fill="x", padx=15, pady=5)
+        
+        def load_history():
+            for w in history_frame.winfo_children(): w.destroy()
+            from logic.central_auth import CentralAuth
+            notes = CentralAuth().get_notes_for_student(student_id)
+            if not notes:
+                ctk.CTkLabel(history_frame, text="No previous notes for this student.", text_color="#555", font=FONTS["caption"]).pack(pady=10)
+                return
+            for n in notes:
+                st = n.get('note_status', 'ACTIVE')
+                if st == 'CRITICAL': c = "#FF5555"
+                elif st == 'FOLLOW_UP': c = "yellow"
+                elif st == 'ACTIVE': c = "#4ADE80"
+                else: c = "cyan"
+                
+                # Chat-style bubble
+                b_frame = ctk.CTkFrame(history_frame, fg_color="transparent")
+                b_frame.pack(fill="x", pady=5, padx=10)
+                
+                # Left colored border effect
+                f_card = ctk.CTkFrame(b_frame, fg_color=c, corner_radius=8)
+                f_card.pack(anchor="w", fill="x")
+                
+                inner_card = ctk.CTkFrame(f_card, fg_color="#18181b", corner_radius=6)
+                inner_card.pack(fill="both", expand=True, padx=(4, 1), pady=1)
+                
+                author = n.get('faculty_username', 'Unknown')
+                dt = n.get('created_at')
+                dt_str = dt.strftime("%b %d, %Y %I:%M %p") if dt else "Unknown Date"
+                
+                head_f = ctk.CTkFrame(inner_card, fg_color="transparent")
+                head_f.pack(fill="x", padx=10, pady=(8,0))
+                
+                ctk.CTkLabel(head_f, text=f"{author}", font=FONTS["body"], text_color="#e4e4e7").pack(side="left")
+                ctk.CTkLabel(head_f, text=f" • {dt_str}", font=FONTS["badge"], text_color="#aaa").pack(side="left", padx=5)
+                
+                badge = ctk.CTkLabel(head_f, text=f" {st} ", font=FONTS["badge"], text_color="#000", fg_color=c, corner_radius=4)
+                badge.pack(side="right", padx=(10,0))
+                
+                ctk.CTkLabel(inner_card, text=n.get('note_text', ''), font=FONTS["body"], text_color="#a1a1aa", wraplength=450, justify="left").pack(anchor="w", padx=10, pady=(8,10))
+                
+        load_history()
+        
+        # ----------------------------------------------------
+        # 4.2 ADD FACULTY NOTE (Left Pane)
+        # ----------------------------------------------------
+        input_card = ctk.CTkFrame(left_pane, fg_color="#121212", corner_radius=8, border_width=1, border_color="#222")
+        input_card.pack(fill="x", pady=(0, 10))
+        
+        ctk.CTkLabel(input_card, text="➕ ADD FACULTY NOTE", font=FONTS["body"], text_color="#FFD600").pack(anchor="w", padx=15, pady=(10, 5))
+        
+        status_f = ctk.CTkFrame(input_card, fg_color="transparent")
+        status_f.pack(fill="x", padx=15, pady=(5, 5))
+        ctk.CTkLabel(status_f, text="Note Status:", font=FONTS["caption"], text_color="#a1a1aa").pack(side="left", padx=(0, 10))
+        self.note_status_var = ctk.StringVar(value="ACTIVE")
+        self.note_status_combo = ctk.CTkComboBox(status_f, values=["ACTIVE", "FOLLOW_UP", "CRITICAL", "CLOSED"], variable=self.note_status_var, width=150, fg_color="#1e1e24", border_color="#3f3f46", button_color="#3f3f46")
+        self.note_status_combo.pack(side="left")
+        
+        input_wrapper = ctk.CTkFrame(input_card, fg_color="#1e1e24", corner_radius=12, border_width=1, border_color="#3f3f46")
+        input_wrapper.pack(fill="x", padx=15, pady=(5, 15))
+        
+        note_text = ctk.CTkTextbox(input_wrapper, height=50, fg_color="transparent", text_color="white", border_width=0, font=FONTS["body"])
+        note_text.pack(side="left", fill="both", expand=True, padx=(10, 5), pady=10)
+        
+        def save_faculty_note():
+            nt = note_text.get("1.0", "end-1c").strip()
+            if not nt: return
+            fac_usr = self.controller.shared_data.get("username", "Unknown")
+            dept = self.controller.shared_data.get("department", data.get("branch_name", "Unknown"))
+            st = self.note_status_var.get()
+            CentralAuth().save_faculty_note(student_id, fac_usr, dept, nt, note_status=st)
+            note_text.delete("1.0", "end")
+            from ui.dashboard import ModernMessagebox
+            ModernMessagebox("Note Saved", "Faculty note successfully added to student record.", "success")
+            load_history() # Refresh the embedded history
+            
+        send_btn = ctk.CTkButton(input_wrapper, text="➤", width=40, height=40, corner_radius=8, font=FONTS["h2"], fg_color="#38bdf8", text_color="black", hover_color="#0284c7", command=save_faculty_note)
+        send_btn.pack(side="right", padx=10, pady=10)
 
         # ----------------------------------------------------
         # 5. WHY THE MODEL MADE THIS DECISION (Right Pane)
@@ -648,7 +815,7 @@ class RiskIntelligenceDashboard(ctk.CTkFrame):
         contrib_card = ctk.CTkFrame(right_pane, fg_color="#121212", corner_radius=8, border_width=1, border_color="#222")
         contrib_card.pack(fill="x", pady=(0, 10))
         
-        ctk.CTkLabel(contrib_card, text="⚖️ WHY THE MODEL MADE THIS DECISION", font=("Arial", 12, "bold"), text_color=COLORS["accent"]).pack(anchor="w", padx=15, pady=(10, 5))
+        ctk.CTkLabel(contrib_card, text="⚖️ WHY THE MODEL MADE THIS DECISION", font=FONTS["body"], text_color=COLORS["accent"]).pack(anchor="w", padx=15, pady=(10, 5))
         
         contribs = report.get('contributions', {})
         if contribs:
@@ -659,13 +826,13 @@ class RiskIntelligenceDashboard(ctk.CTkFrame):
                 row = ctk.CTkFrame(contrib_card, fg_color="transparent")
                 row.pack(fill="x", padx=15, pady=2)
                 
-                c_lbl = ctk.CTkLabel(row, text=f"{idx+1}. {name}", font=("Arial", 11), text_color="#ccc")
+                c_lbl = ctk.CTkLabel(row, text=f"{idx+1}. {name}", font=FONTS["caption"], text_color="#ccc")
                 c_lbl.pack(side="left")
                 
                 prefix = "+" if val > 0 else ""
                 color = COLORS["danger"] if val > 0 else (COLORS["success"] if val < 0 else "#888")
                 
-                c_val = ctk.CTkLabel(row, text=f"{prefix}{val:.1f} Risk Points", font=("Arial", 11, "bold"), text_color=color)
+                c_val = ctk.CTkLabel(row, text=f"{prefix}{val:.0f}%", font=FONTS["caption"], text_color=color)
                 c_val.pack(side="right")
                 
             # Chart Section
@@ -696,7 +863,7 @@ class RiskIntelligenceDashboard(ctk.CTkFrame):
             except Exception:
                 pass
         else:
-            ctk.CTkLabel(contrib_card, text="No risk contribution factor records.", font=("Arial", 11), text_color="#777").pack(anchor="w", padx=15, pady=(0, 15))
+            ctk.CTkLabel(contrib_card, text="No risk contribution factor records.", font=FONTS["caption"], text_color="#777").pack(anchor="w", padx=15, pady=(0, 15))
 
         # ----------------------------------------------------
         # 6. INTERVENTION FORECAST (Right Pane)
@@ -704,7 +871,7 @@ class RiskIntelligenceDashboard(ctk.CTkFrame):
         forecast_card = ctk.CTkFrame(right_pane, fg_color="#121212", corner_radius=8, border_width=1, border_color="#222")
         forecast_card.pack(fill="x", pady=(0, 10))
         
-        ctk.CTkLabel(forecast_card, text="🔮 INTERVENTION FORECAST", font=("Arial", 12, "bold"), text_color=COLORS["accent"]).pack(anchor="w", padx=15, pady=(10, 5))
+        ctk.CTkLabel(forecast_card, text="🔮 INTERVENTION FORECAST", font=FONTS["body"], text_color=COLORS["accent"]).pack(anchor="w", padx=15, pady=(10, 5))
         
         # Attendance Intervention Simulation
         sc1_data = data.copy()
@@ -726,14 +893,14 @@ class RiskIntelligenceDashboard(ctk.CTkFrame):
         for act, res, diff in forecasts:
             row = ctk.CTkFrame(forecast_card, fg_color="#1a1a1a")
             row.pack(fill="x", padx=15, pady=3)
-            ctk.CTkLabel(row, text=f"Scenario: {act}", font=("Arial", 11, "bold"), text_color="white", anchor="w").pack(side="left", padx=10, pady=8)
+            ctk.CTkLabel(row, text=f"Scenario: {act}", font=FONTS["caption"], text_color="white", anchor="w").pack(side="left", padx=10, pady=8)
             
             val_frame = ctk.CTkFrame(row, fg_color="transparent")
             val_frame.pack(side="right", padx=10)
             
-            ctk.CTkLabel(val_frame, text=res, font=("Arial", 11, "bold"), text_color="#4ADE80" if diff > 0 else "#888").pack(side="left")
+            ctk.CTkLabel(val_frame, text=res, font=FONTS["caption"], text_color="#4ADE80" if diff > 0 else "#888").pack(side="left")
             if diff > 0:
-                ctk.CTkLabel(val_frame, text=f" (-{diff:.1f} pts)", font=("Arial", 10), text_color="#4ADE80").pack(side="left")
+                ctk.CTkLabel(val_frame, text=f" (-{diff:.1f} pts)", font=FONTS["badge"], text_color="#4ADE80").pack(side="left")
             
         ctk.CTkFrame(forecast_card, height=10, fg_color="transparent").pack()
 
@@ -743,8 +910,10 @@ class RiskIntelligenceDashboard(ctk.CTkFrame):
         rec_card = ctk.CTkFrame(right_pane, fg_color="#121212", corner_radius=8, border_width=1, border_color="#222")
         rec_card.pack(fill="x", pady=(0, 10))
         
-        ctk.CTkLabel(rec_card, text="✅ RECOMMENDED ACTIONS (Prioritized)", font=("Arial", 12, "bold"), text_color="#4ADE80").pack(anchor="w", padx=15, pady=(10, 5))
+        ctk.CTkLabel(rec_card, text="✅ RECOMMENDED ACTIONS (Prioritized)", font=FONTS["body"], text_color="#4ADE80").pack(anchor="w", padx=15, pady=(10, 5))
         
+        ctk.CTkFrame(rec_card, height=10, fg_color="transparent").pack()
+
         recs = report.get('recommendations', [])
         if recs:
             for idx, rec in enumerate(recs[:4]):
@@ -752,9 +921,9 @@ class RiskIntelligenceDashboard(ctk.CTkFrame):
                     txt = f"{idx+1}. {rec.get('action','')} — {rec.get('reason','')}"
                 else:
                     txt = f"{idx+1}. {str(rec)}"
-                ctk.CTkLabel(rec_card, text=txt, wraplength=450, justify="left", font=("Arial", 11), text_color="#d1fae5").pack(anchor="w", padx=15, pady=2)
+                ctk.CTkLabel(rec_card, text=txt, wraplength=450, justify="left", font=FONTS["caption"], text_color="#d1fae5").pack(anchor="w", padx=15, pady=2)
         else:
-            ctk.CTkLabel(rec_card, text="1. Maintain current academic parameters.", font=("Arial", 11), text_color="#aaa").pack(anchor="w", padx=15, pady=5)
+            ctk.CTkLabel(rec_card, text="1. Maintain current academic parameters.", font=FONTS["caption"], text_color="#aaa").pack(anchor="w", padx=15, pady=5)
             
         ctk.CTkFrame(rec_card, height=10, fg_color="transparent").pack()
 
@@ -764,7 +933,7 @@ class RiskIntelligenceDashboard(ctk.CTkFrame):
         tracker_card = ctk.CTkFrame(right_pane, fg_color="#121212", corner_radius=8, border_width=1, border_color="#222")
         tracker_card.pack(fill="x", pady=(0, 10))
         
-        ctk.CTkLabel(tracker_card, text="🎯 INTERVENTION TRACKING", font=("Arial", 12, "bold"), text_color="#00E5FF").pack(anchor="w", padx=15, pady=(10, 5))
+        ctk.CTkLabel(tracker_card, text="🎯 INTERVENTION TRACKING", font=FONTS["body"], text_color="#00E5FF").pack(anchor="w", padx=15, pady=(10, 5))
         
         # Action to save a recommendation as an intervention
         def add_to_tracker(act, rsn, prio):
@@ -780,8 +949,8 @@ class RiskIntelligenceDashboard(ctk.CTkFrame):
             act = rec.get('action', str(rec)) if isinstance(rec, dict) else str(rec)
             rsn = rec.get('reason', '') if isinstance(rec, dict) else ''
             prio = 1
-            ctk.CTkLabel(rec_add_f, text=f"Top AI Rec: {act}", font=("Arial", 11, "italic"), text_color="#aaa").pack(side="left")
-            ctk.CTkButton(rec_add_f, text="+ Add to Tracked", width=100, height=20, font=("Arial", 10), fg_color="#1e3a5f", command=lambda: add_to_tracker(act, rsn, prio)).pack(side="right")
+            ctk.CTkLabel(rec_add_f, text=f"Top AI Rec: {act}", font=FONTS["caption"], text_color="#aaa").pack(side="left")
+            ctk.CTkButton(rec_add_f, text="+ Add to Tracked", width=100, height=20, font=FONTS["badge"], fg_color="#1e3a5f", command=lambda: add_to_tracker(act, rsn, prio)).pack(side="right")
         
         # Display Tracked Interventions
         tracked_scroll = ctk.CTkScrollableFrame(tracker_card, fg_color="transparent", height=120)
@@ -790,21 +959,21 @@ class RiskIntelligenceDashboard(ctk.CTkFrame):
         tracked = self.db.get_interventions(data['id']) if self.db and 'id' in data else []
         
         if not tracked:
-            ctk.CTkLabel(tracked_scroll, text="No active interventions being tracked.", text_color="#666", font=("Arial", 11)).pack(anchor="w")
+            ctk.CTkLabel(tracked_scroll, text="No active interventions being tracked.", text_color="#666", font=FONTS["caption"]).pack(anchor="w")
         else:
             completed = sum(1 for t in tracked if t['status'] == 'Completed')
             effectiveness = (completed / len(tracked)) * 100 if len(tracked) > 0 else 0
             
             eff_card = ctk.CTkFrame(tracker_card, fg_color="#1a1a1a")
             eff_card.pack(fill="x", padx=15, pady=(0, 10))
-            ctk.CTkLabel(eff_card, text=f"Effectiveness Score: {effectiveness:.0f}%", font=("Arial", 12, "bold"), text_color=COLORS["success"] if effectiveness > 50 else COLORS["warning"]).pack(side="left", padx=10, pady=5)
-            ctk.CTkLabel(eff_card, text=f"({completed}/{len(tracked)} Resolved)", font=("Arial", 10), text_color="#888").pack(side="right", padx=10, pady=5)
+            ctk.CTkLabel(eff_card, text=f"Effectiveness Score: {effectiveness:.0f}%", font=FONTS["body"], text_color=COLORS["success"] if effectiveness > 50 else COLORS["warning"]).pack(side="left", padx=10, pady=5)
+            ctk.CTkLabel(eff_card, text=f"({completed}/{len(tracked)} Resolved)", font=FONTS["badge"], text_color="#888").pack(side="right", padx=10, pady=5)
 
             for t in tracked:
                 t_row = ctk.CTkFrame(tracked_scroll, fg_color="#1a1a1a", corner_radius=6)
                 t_row.pack(fill="x", pady=2)
                 
-                ctk.CTkLabel(t_row, text=t['recommendation_text'], font=("Arial", 11, "bold"), text_color="white", wraplength=250, justify="left").pack(side="left", padx=10, pady=8)
+                ctk.CTkLabel(t_row, text=t['recommendation_text'], font=FONTS["caption"], text_color="white", wraplength=250, justify="left").pack(side="left", padx=10, pady=8)
                 
                 status_color = {"Planned": "#ffa502", "In Progress": "#1e90ff", "Completed": "#2ed573"}
                 clr = status_color.get(t['status'], "white")
@@ -816,7 +985,7 @@ class RiskIntelligenceDashboard(ctk.CTkFrame):
                         self.db.update_intervention_status(t_id, next_stat)
                         self.refresh(self.raw_data)
                 
-                stat_btn = ctk.CTkButton(t_row, text=t['status'], width=80, height=20, font=("Arial", 10, "bold"), text_color=clr, fg_color="#222", hover_color="#333", command=cycle_status)
+                stat_btn = ctk.CTkButton(t_row, text=t['status'], width=80, height=20, font=FONTS["badge"], text_color=clr, fg_color="#222", hover_color="#333", command=cycle_status)
                 stat_btn.pack(side="right", padx=10, pady=5)
 
         # ----------------------------------------------------
@@ -825,7 +994,7 @@ class RiskIntelligenceDashboard(ctk.CTkFrame):
         notes_card = ctk.CTkFrame(self.scroll, fg_color="#121212", corner_radius=8, border_width=1, border_color="#222")
         notes_card.pack(fill="x", pady=(10, 20))
         
-        ctk.CTkLabel(notes_card, text="📝 FACULTY OBSERVATION NOTES & HISTORY", font=("Arial", 12, "bold"), text_color="gray").pack(anchor="w", padx=15, pady=(10, 2))
+        ctk.CTkLabel(notes_card, text="📝 FACULTY OBSERVATION NOTES & HISTORY", font=FONTS["body"], text_color="gray").pack(anchor="w", padx=15, pady=(10, 2))
         
         self.txt_note = ctk.CTkTextbox(notes_card, height=60, fg_color="#1b1b1b")
         self.txt_note.pack(fill="x", padx=15, pady=5)
@@ -834,11 +1003,11 @@ class RiskIntelligenceDashboard(ctk.CTkFrame):
         history_frame = ctk.CTkFrame(notes_card, fg_color="transparent")
         history_frame.pack(fill="x", padx=15, pady=5)
         
-        ctk.CTkLabel(history_frame, text="Saved Notes History:", font=("Arial", 10, "bold"), text_color="#555").pack(anchor="w")
-        ctk.CTkLabel(history_frame, text="• No previous faculty notes found for this student.", font=("Arial", 11, "italic"), text_color="#777").pack(anchor="w", padx=10, pady=2)
+        ctk.CTkLabel(history_frame, text="Saved Notes History:", font=FONTS["badge"], text_color="#555").pack(anchor="w")
+        ctk.CTkLabel(history_frame, text="• No previous faculty notes found for this student.", font=FONTS["caption"], text_color="#777").pack(anchor="w", padx=10, pady=2)
         
         def save_note():
             ModernMessagebox("Saved", "Observations recorded to student audit logs.", "success")
             
-        ctk.CTkButton(notes_card, text="SAVE OBSERVATION", fg_color="#222", font=("Arial", 11, "bold"), command=save_note).pack(anchor="e", padx=15, pady=(5, 10))
+        ctk.CTkButton(notes_card, text="SAVE OBSERVATION", fg_color="#222", font=FONTS["caption"], command=save_note).pack(anchor="e", padx=15, pady=(5, 10))
 

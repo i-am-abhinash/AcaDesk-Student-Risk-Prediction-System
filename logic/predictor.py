@@ -225,7 +225,16 @@ class RiskPredictor:
 
             if missing_data and risk_score > 75:
                 risk_score = 75
-            risk_score = round(max(0, min(100, risk_score)), 1)
+                
+            # Final normalization to ensure it strictly respects the user-defined bounds
+            if pred == 'High':
+                risk_score = max(71.0, min(100.0, float(risk_score)))
+            elif pred == 'Medium':
+                risk_score = max(41.0, min(70.0, float(risk_score)))
+            else:
+                risk_score = max(5.0, min(40.0, float(risk_score)))
+                
+            risk_score = round(risk_score, 1)
 
             # Extract Contributions (Dynamic SHAP or Fallback)
             if 'shap_dict' in locals() and shap_dict:
@@ -237,7 +246,7 @@ class RiskPredictor:
                     
                 total_shap_abs = sum(abs(v) for v in shap_dict.values())
                 if total_shap_abs > 0:
-                    contribs = {k.replace("_", " ").title(): (abs(v) / total_shap_abs) * 100 for k, v in shap_dict.items() if abs(v) > 0.01}
+                    contribs = {k.replace("_", " ").title(): (v / total_shap_abs) * 100 for k, v in shap_dict.items() if abs(v) > 0.01}
                 else:
                     contribs = {"No Major Factors": 100}
             else:
@@ -296,6 +305,11 @@ class RiskPredictor:
         # Override action if critical decline
         if trend_info and trend_info.get("is_critical_drop"):
             act = "Immediate Intervention (Critical Drop)"
+        # NLP Explanation for SHAP
+        highest_contrib_factor = None
+        if contribs and len(contribs) > 0 and "No Major Factors" not in contribs:
+            highest_contrib_factor = max(contribs.items(), key=lambda x: abs(x[1]))[0]
+
         return {
             "score": risk_score, "level": pred, "dominant": dom, 
             "action": act, "contributions": contribs, "tags": "ML-RF",
@@ -303,7 +317,8 @@ class RiskPredictor:
             "trend": trend_data, "trend_info": trend_info,
             "shap_values": shap_dict if 'shap_dict' in locals() else {},
             "nlg_report": nlg_report if 'nlg_report' in locals() else "",
-            "recommendations": recommendations if 'recommendations' in locals() else []
+            "recommendations": recommendations if 'recommendations' in locals() else [],
+            "nlp_explanation": f"{highest_contrib_factor} is the strongest contributor to this student's risk prediction." if highest_contrib_factor else "Insufficient data to determine primary risk contributor."
         }
 
     def analyze_first_year(self, att, tenth, inter, diploma, bkl):
@@ -389,6 +404,12 @@ class RiskPredictor:
         ie = InterventionEngine()
         recommendations = ie.generate_recommendations(pred, dom_factors, {'attendance': att, 'backlogs': bkl})
         report_text = ie.generate_nlp_report(pred, dom_factors, {'attendance': att, 'backlogs': bkl}, recommendations)
+        
+        # --- NATURAL LANGUAGE GENERATION FOR SHAP ---
+        highest_contrib_factor = None
+        if contribs:
+            # Find the factor with the highest absolute percentage
+            highest_contrib_factor = max(contribs.items(), key=lambda x: abs(x[1]))[0]
             
         return {
             "level": pred, "score": risk_score, "dominant": dom,
@@ -397,16 +418,17 @@ class RiskPredictor:
             "nlg_report": report_text,
             "recommendations": recommendations,
             "confidence": "High",
-            "trend": [], "is_first_year": True
+            "trend": [], "is_first_year": True,
+            "nlp_explanation": f"{highest_contrib_factor} is the strongest contributor to this student's risk prediction." if highest_contrib_factor else "Insufficient data to determine primary risk contributor."
         }
 
     def _get_fallback_report(self, a, m, b):
         return {
-            "score": 0, "level": "Low", "dominant": "-", "action": "-", 
-            "contributions": {}, "tags": "ERR", "confidence": "Low", "trend": [],
-            "shap_values": {}, "nlg_report": "Error predicting risk due to model failure or missing data."
+            "score": 5.0, "level": "Low", "dominant": "-", "action": "-", 
+            "contributions": {}, "tags": "ERR", "confidence": "Low (Missing Data)", "trend": [],
+            "shap_values": {}, "nlg_report": "Unable to calculate accurate risk metrics due to missing essential data points."
         }
     
     def _get_error_report(self):
-        return {"score": 0, "level": "Error", "dominant": "-", "action": "-", 
+        return {"score": 5.0, "level": "Error", "dominant": "-", "action": "-", 
                 "contributions": {}, "tags": "ERR", "confidence": "Low", "trend": []}

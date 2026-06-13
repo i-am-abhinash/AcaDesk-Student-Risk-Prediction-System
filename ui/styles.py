@@ -20,13 +20,14 @@ FONTS = {
     "h2": ("Roboto", 20, "bold"),
     "h3": ("Roboto", 16, "bold"),
     "body": ("Roboto", 12),
-    "code": ("Consolas", 14, "bold"),
+    "code": ("Consolas", 12),
     "badge": ("Arial", 10, "bold"),
+    "caption": ("Roboto", 11),
 }
 
 # --- LAYOUT DIMENSIONS ---
 DIMS = {
     "sidebar_width": 250,
     "card_height": 60,
-    "btn_height": 50,
+    "btn_height": 42,
 }

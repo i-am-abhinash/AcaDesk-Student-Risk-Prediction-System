@@ -263,7 +263,7 @@ def main():
     ]
 
     dept_id_map = {}
-    print("Inserting departments → HODs → faculty...")
+    print("Inserting departments -> HODs -> faculty...")
     for code, name in departments_info:
         # Insert department (dept_head_id will be set later)
         ins = dept.insert().values(dept_code=code, dept_name=name, dept_head_id=None)
@@ -288,7 +288,10 @@ def main():
         # Faculty members (5‑10 per department)
         for _ in range(random.randint(5, 10)):
             fac_name = random_name()
-            fac_email = f"{fac_name.replace(' ', '.').lower()}@{code.lower()}.edu"
+            # ensure uniqueness
+            fac_email = (
+                f"{fac_name.lower().replace(' ', '.')}{random.randint(100, 999)}@{code.lower()}.edu"
+            )
             designation = random.choice(
                 ["Assistant Professor", "Associate Professor", "Professor"]
             )
@@ -429,31 +432,31 @@ def main():
                 # Academic record (realistic mix)
                 perf = random.choices(
                     population=["high", "average", "at_risk", "improving", "declining"],
-                    weights=[0.15, 0.55, 0.10, 0.15, 0.05],
+                    weights=[0.05, 0.10, 0.60, 0.05, 0.20],
                     k=1,
                 )[0]
 
                 if perf == "high":
                     cgpa = round(random.uniform(8.5, 10.0), 2)
-                    attendance = round(random.uniform(90, 100), 2)
+                    att_val = round(random.uniform(90, 100), 2)
                     backlog = 0
                 elif perf == "average":
                     cgpa = round(random.uniform(6.0, 8.4), 2)
-                    attendance = round(random.uniform(75, 89), 2)
+                    att_val = round(random.uniform(75, 89), 2)
                     backlog = random.choice([0, 1])
                 elif perf == "at_risk":
                     cgpa = round(random.uniform(4.0, 5.9), 2)
-                    attendance = round(random.uniform(50, 74), 2)
+                    att_val = round(random.uniform(50, 74), 2)
                     backlog = random.randint(2, 4)
                 elif perf == "improving":
                     base_cgpa = 4.5 + (semester_number * 0.2)
                     cgpa = min(round(base_cgpa, 2), 9.0)
-                    attendance = min(round(55 + (semester_number * 5), 2), 95)
+                    att_val = min(round(55 + (semester_number * 5), 2), 95)
                     backlog = max(0, 3 - semester_number)
                 else:  # declining
                     base_cgpa = 9.0 - (semester_number * 0.3)
                     cgpa = max(round(base_cgpa, 2), 3.5)
-                    attendance = max(round(95 - (semester_number * 5), 2), 45)
+                    att_val = max(round(95 - (semester_number * 5), 2), 45)
                     backlog = min(3, semester_number)
 
                 session.execute(
@@ -462,7 +465,7 @@ def main():
                         semester=semester_number,
                         year=year,
                         cgpa=cgpa,
-                        attendance_percentage=attendance,
+                        attendance_percentage=att_val,
                         backlog_count=backlog,
                         internal_marks=round(random.uniform(60, 100), 2),
                         mid_exam_score=round(random.uniform(60, 100), 2),
@@ -475,7 +478,7 @@ def main():
                 month_start = datetime.date(2022 + year, (sem - 1) * 6 + 1, 1)
                 for day_offset in range(30):
                     cur_date = month_start + datetime.timedelta(days=day_offset)
-                    present = 1 if random.random() * 100 < attendance else 0
+                    present = 1 if random.random() * 100 < att_val else 0
                     session.execute(
                         attendance.insert().values(
                             student_id=stu_id, date=cur_date, present=present

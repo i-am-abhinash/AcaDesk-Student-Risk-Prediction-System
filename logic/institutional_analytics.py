@@ -135,6 +135,7 @@ class InstitutionalAnalytics:
             health -= min(25, dept_stats["avg_backlogs"] * 5)
             
             dept_stats["health_score"] = max(0, min(100, int(health)))
+            dept_stats["raw_health"] = health
             
             departments[branch_name] = dept_stats
             
@@ -144,8 +145,8 @@ class InstitutionalAnalytics:
             
         inst_health = sum(d["health_score"] for d in departments.values()) / len(departments)
         
-        # Sort departments by Health Score
-        ranked_depts = sorted(departments.items(), key=lambda x: x[1]["health_score"], reverse=True)
+        # Sort departments by Health Score, tie-break with raw health float, then alphabetically
+        ranked_depts = sorted(departments.items(), key=lambda x: (x[1]["health_score"], x[1]["raw_health"], x[0]), reverse=True)
         
         # Generate NLG Insight
         nlg_insight = InstitutionalNLG.generate_insight(ranked_depts, total_students)
@@ -162,7 +163,19 @@ class InstitutionalNLG:
     @staticmethod
     def generate_insight(ranked_depts, total_students):
         if not ranked_depts:
-            return "Insufficient data to generate institutional insights."
+            return "Insufficient data to generate insights."
+            
+        if len(ranked_depts) == 1:
+            dept_name, stats = ranked_depts[0]
+            insight = f"Your department (**{dept_name}**) is currently monitoring {total_students} students with a health score of {stats['health_score']}/100. "
+            if stats["High"] > 0:
+                insight += f"There are {stats['High']} students at high risk. "
+                if stats.get("top_drivers"):
+                    drivers = ", ".join(stats["top_drivers"])
+                    insight += f"The primary issues driving risk in your department are: {drivers}."
+            else:
+                insight += "Your department is maintaining stable risk levels with no high-risk students."
+            return insight
             
         best_dept_name, best_stats = ranked_depts[0]
         worst_dept_name, worst_stats = ranked_depts[-1]
@@ -171,7 +184,7 @@ class InstitutionalNLG:
         
         if worst_stats["High"] > 0:
             insight += f"The **{worst_dept_name}** department requires immediate management attention. It currently holds the lowest health score ({worst_stats['health_score']}/100) and has the highest concentration of at-risk students. "
-            if worst_stats["top_drivers"]:
+            if worst_stats.get("top_drivers"):
                 drivers = ", ".join(worst_stats["top_drivers"])
                 insight += f"The primary systemic issues driving risk in {worst_dept_name} are: {drivers}. "
         else:

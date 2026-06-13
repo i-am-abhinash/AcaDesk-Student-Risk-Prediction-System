@@ -11,26 +11,42 @@ class AnalyticsDBHandler:
         self.port = int(cfg.get("port", 3306))
 
     def _get_server_connection(self):
+        if not self.password:
+            print(f"❌ Critical: No password provided for user '{self.user}' on {self.host}")
+            return None
         try:
             return mysql.connector.connect(
                 host=self.host,
                 user=self.user,
                 password=self.password,
-                port=self.port
+                port=self.port,
+                connect_timeout=5
             )
-        except:
+        except mysql.connector.Error as err:
+            print(f"❌ Analytics Server Connection Error: {err.msg} (Error Code: {err.errno})")
+            return None
+        except Exception as e:
+            print(f"❌ Unexpected Analytics Server Error: {e}")
             return None
 
     def _get_connection(self):
+        if not self.password:
+            print(f"❌ Critical: No password provided for user '{self.user}' on {self.host}")
+            return None
         try:
             return mysql.connector.connect(
                 host=self.host,
                 user=self.user,
                 password=self.password,
                 database=self.database,
-                port=self.port
+                port=self.port,
+                connect_timeout=5
             )
-        except:
+        except mysql.connector.Error as err:
+            print(f"❌ Analytics DB Connection Error: {err.msg} (Error Code: {err.errno})")
+            return None
+        except Exception as e:
+            print(f"❌ Unexpected Analytics DB Error: {e}")
             return None
 
     def initialize_tables(self):

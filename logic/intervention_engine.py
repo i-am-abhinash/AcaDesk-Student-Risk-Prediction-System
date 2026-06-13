@@ -136,7 +136,7 @@ class InterventionEngine:
         finally:
             conn.close()
 
-    def save_intervention(self, college_name, student_id, faculty_username, risk_level, dominant_factor, action, priority, status="Planned"):
+    def save_intervention(self, college_name, student_id, faculty_username, risk_level, dominant_factor, action, priority, status="Planned", before_metrics=None):
         """
         Saves a new intervention tracking record.
         """
@@ -146,11 +146,15 @@ class InterventionEngine:
             return False
         try:
             cursor = conn.cursor()
+            before_att = before_metrics.get("att") if before_metrics else None
+            before_marks = before_metrics.get("marks") if before_metrics else None
+            before_bkl = before_metrics.get("bkl") if before_metrics else None
+            
             cursor.execute(
                 """INSERT INTO interventions 
-                   (college_name, student_id, faculty_username, risk_level, dominant_factor, recommended_action, priority, status)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
-                (college_name, student_id, faculty_username, risk_level, dominant_factor, action, priority, status)
+                   (college_name, student_id, faculty_username, risk_level, dominant_factor, recommended_action, priority, status, before_att, before_marks, before_bkl)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                (college_name, student_id, faculty_username, risk_level, dominant_factor, action, priority, status, before_att, before_marks, before_bkl)
             )
             conn.commit()
             return True
@@ -160,7 +164,7 @@ class InterventionEngine:
         finally:
             conn.close()
             
-    def update_intervention_status(self, record_id, new_status):
+    def update_intervention_status(self, record_id, new_status, after_metrics=None):
         """
         Updates the status of an existing intervention.
         """
@@ -170,7 +174,18 @@ class InterventionEngine:
             return False
         try:
             cursor = conn.cursor()
-            cursor.execute("UPDATE interventions SET status=%s WHERE id=%s", (new_status, record_id))
+            if new_status == "Completed" and after_metrics:
+                after_att = after_metrics.get("att")
+                after_marks = after_metrics.get("marks")
+                after_bkl = after_metrics.get("bkl")
+                cursor.execute("""
+                    UPDATE interventions 
+                    SET status=%s, after_att=%s, after_marks=%s, after_bkl=%s, completed_at=CURRENT_TIMESTAMP 
+                    WHERE id=%s
+                """, (new_status, after_att, after_marks, after_bkl, record_id))
+            else:
+                cursor.execute("UPDATE interventions SET status=%s WHERE id=%s", (new_status, record_id))
+                
             conn.commit()
             return True
         except Exception as e:

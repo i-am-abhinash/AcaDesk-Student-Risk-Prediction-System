@@ -8,3 +8,9 @@ dist/
 *.pyz
 .env
 secret.key
+*.db
+*.sqlite
+*.sqlite3
+*.csv
+*.txt
+*.pkl

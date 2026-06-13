@@ -13,15 +13,23 @@ class CentralAuth:
         self.port = int(cfg.get("port", 3306))
 
     def _get_conn(self):
+        if not self.password:
+            print(f"❌ Auth Critical: No password for user '{self.user}' on {self.host}")
+            return None
         try:
             return mysql.connector.connect(
                 host=self.host,
                 user=self.user,
                 password=self.password,
                 database=self.database,
-                port=self.port
+                port=self.port,
+                connect_timeout=5
             )
-        except:
+        except mysql.connector.Error as err:
+            print(f"❌ Auth Connection Error: {err.msg}")
+            return None
+        except Exception as e:
+            print(f"❌ Auth Unexpected Error: {e}")
             return None
 
     def initialize_tables(self):
@@ -80,7 +88,16 @@ class CentralAuth:
                 col_email VARCHAR(100),
                 col_att VARCHAR(100),
                 col_marks VARCHAR(100),
-                col_backlogs VARCHAR(100)
+                col_backlogs VARCHAR(100),
+                col_tenth VARCHAR(100),
+                col_inter VARCHAR(100),
+                col_diploma VARCHAR(100),
+                col_lab_perf VARCHAR(100),
+                col_mid_exam VARCHAR(100),
+                col_cons_abs VARCHAR(100),
+                col_leave_freq VARCHAR(100),
+                col_parent_phone VARCHAR(100),
+                col_parent_email VARCHAR(100)
             )""")
             
             cursor.execute("""CREATE TABLE IF NOT EXISTS interventions (
@@ -327,6 +344,34 @@ class CentralAuth:
         finally:
             conn.close()
 
+    def update_password(self, username, user_type, current_password, new_password):
+        conn = self._get_conn()
+        if not conn: return False, "Database connection failed"
+        
+        from logic.encryption import hash_password
+        curr_hashed = hash_password(current_password)
+        new_hashed = hash_password(new_password)
+        
+        table = ""
+        if user_type == "Admin": table = "admins"
+        elif user_type == "HOD": table = "hod_accounts"
+        elif user_type == "Faculty": table = "faculty_accounts"
+        else: return False, "Invalid user type"
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT * FROM {table} WHERE username=%s AND password_hash=%s", (username, curr_hashed))
+            if not cursor.fetchone():
+                return False, "Incorrect current password"
+                
+            cursor.execute(f"UPDATE {table} SET password_hash=%s WHERE username=%s", (new_hashed, username))
+            conn.commit()
+            return True, "Password updated successfully"
+        except Exception as e:
+            return False, str(e)
+        finally:
+            conn.close()
+
     def save_erp_config(self, college, db_type, host, port, db_name, db_user, db_pass, mapping=None):
         conn = self._get_conn()
         if not conn: return False
@@ -388,5 +433,130 @@ class CentralAuth:
         except Exception as e:
             print("log_email_sent error:", e)
             return False
+        finally:
+            conn.close()
+
+    def save_faculty_note(self, student_id, faculty_username, department, note_text, note_status="ACTIVE"):
+        conn = self._get_conn()
+        if not conn: return False
+        try:
+            cursor = conn.cursor()
+            cursor.execute("INSERT INTO faculty_notes (student_id, faculty_username, department, note_text, note_status) VALUES (%s, %s, %s, %s, %s)",
+                           (student_id, faculty_username, department, note_text, note_status))
+            conn.commit()
+            return True
+        except Exception as e:
+            print("save_faculty_note error:", e)
+            return False
+        finally:
+            conn.close()
+
+    def get_notes_for_student(self, student_id):
+        conn = self._get_conn()
+        if not conn: return []
+        try:
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SELECT * FROM faculty_notes WHERE student_id=%s ORDER BY created_at DESC", (student_id,))
+            return cursor.fetchall()
+        except: return []
+        finally:
+            if conn: conn.close()
+            
+    def get_student_note_stats(self, department=None):
+        conn = self._get_conn()
+        if not conn: return {}
+        try:
+            cursor = conn.cursor(dictionary=True)
+            if department:
+                query = """
+                    SELECT student_id, COUNT(*) as total_notes,
+                           (SELECT note_status FROM faculty_notes f2 
+                            WHERE f2.student_id = faculty_notes.student_id 
+                            ORDER BY created_at DESC LIMIT 1) as latest_status,
+                           (SELECT faculty_username FROM faculty_notes f2 
+                            WHERE f2.student_id = faculty_notes.student_id 
+                            ORDER BY created_at DESC LIMIT 1) as latest_faculty,
+                           (SELECT note_text FROM faculty_notes f2 
+                            WHERE f2.student_id = faculty_notes.student_id 
+                            ORDER BY created_at DESC LIMIT 1) as latest_text,
+                           (SELECT created_at FROM faculty_notes f2 
+                            WHERE f2.student_id = faculty_notes.student_id 
+                            ORDER BY created_at DESC LIMIT 1) as latest_date
+                    FROM faculty_notes
+                    WHERE department = %s
+                    GROUP BY student_id
+                """
+                cursor.execute(query, (department,))
+            else:
+                query = """
+                    SELECT student_id, COUNT(*) as total_notes,
+                           (SELECT note_status FROM faculty_notes f2 
+                            WHERE f2.student_id = faculty_notes.student_id 
+                            ORDER BY created_at DESC LIMIT 1) as latest_status,
+                           (SELECT faculty_username FROM faculty_notes f2 
+                            WHERE f2.student_id = faculty_notes.student_id 
+                            ORDER BY created_at DESC LIMIT 1) as latest_faculty,
+                           (SELECT note_text FROM faculty_notes f2 
+                            WHERE f2.student_id = faculty_notes.student_id 
+                            ORDER BY created_at DESC LIMIT 1) as latest_text,
+                           (SELECT created_at FROM faculty_notes f2 
+                            WHERE f2.student_id = faculty_notes.student_id 
+                            ORDER BY created_at DESC LIMIT 1) as latest_date
+                    FROM faculty_notes
+                    GROUP BY student_id
+                """
+                cursor.execute(query)
+                
+            results = cursor.fetchall()
+            return {r['student_id']: r for r in results}
+        except Exception as e: 
+            print("get_student_note_stats error:", e)
+            return {}
+        finally:
+            conn.close()
+            
+    def get_all_notes(self):
+        conn = self._get_conn()
+        if not conn: return []
+        try:
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SELECT * FROM faculty_notes ORDER BY created_at DESC")
+            return cursor.fetchall()
+        except: return []
+        finally:
+            if conn: conn.close()
+            
+    def get_notes_by_department(self, department):
+        conn = self._get_conn()
+        if not conn: return []
+        try:
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SELECT * FROM faculty_notes WHERE department=%s ORDER BY created_at DESC", (department,))
+            return cursor.fetchall()
+        except: return []
+        finally:
+            if conn: conn.close()
+
+    def update_faculty_note(self, note_id, new_text):
+        conn = self._get_conn()
+        if not conn: return False
+        try:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE faculty_notes SET note_text=%s WHERE id=%s", (new_text, note_id))
+            conn.commit()
+            return True
+        except: return False
+        finally:
+            conn.close()
+
+    def delete_faculty_note(self, note_id):
+        conn = self._get_conn()
+        if not conn: return False
+        try:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM faculty_notes WHERE id=%s", (note_id,))
+            conn.commit()
+            return True
+        except: return False
         finally:
             conn.close()

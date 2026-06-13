@@ -12,28 +12,49 @@ class CentralDBHandler:
 
     def _get_server_connection(self):
         """Connect to MySQL without specifying a database, used for creation."""
+        if not self.password:
+            print(f"❌ Critical: No password provided for user '{self.user}' on {self.host}")
+            return None
         try:
             return mysql.connector.connect(
                 host=self.host,
                 user=self.user,
                 password=self.password,
-                port=self.port
+                port=self.port,
+                connect_timeout=5
             )
+        except mysql.connector.Error as err:
+            print(f"❌ MySQL Server Connection Error: {err.msg} (Error Code: {err.errno})")
+            if err.errno == 1045:
+                print(f"   Hint: Access denied for '{self.user}'@'{self.host}'. Check your password in db_config.json.")
+            return None
         except Exception as e:
-            print(f"MySQL Server Connection Error: {e}")
+            print(f"❌ Unexpected Server Connection Error: {e}")
             return None
 
     def _get_connection(self):
         """Connect to the specific acadesk_central database."""
+        if not self.password:
+            print(f"❌ Critical: No password provided for user '{self.user}' on {self.host}")
+            return None
         try:
             return mysql.connector.connect(
                 host=self.host,
                 user=self.user,
                 password=self.password,
                 database=self.database,
-                port=self.port
+                port=self.port,
+                connect_timeout=5
             )
-        except:
+        except mysql.connector.Error as err:
+            print(f"❌ MySQL DB Connection Error: {err.msg} (Error Code: {err.errno})")
+            if err.errno == 1045:
+                print(f"   Hint: Access denied for '{self.user}'@'{self.host}'. Check your password in db_config.json.")
+            elif err.errno == 1049:
+                print(f"   Hint: Database '{self.database}' does not exist.")
+            return None
+        except Exception as e:
+            print(f"❌ Unexpected DB Connection Error: {e}")
             return None
 
     def initialize_tables(self):

@@ -1,79 +1,94 @@
 import customtkinter as ctk
-from matplotlib.figure import Figure
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import threading
 from ui.styles import COLORS, FONTS
 from logic.db_handler import DBHandler
 from logic.risk_engine import AdvancedRiskPredictor
 
+PREMIUM_BG = "#090A0F"
+PREMIUM_CARD = "#12141E"
+PREMIUM_HOVER = "#1A1D2D"
+
 class InstitutionOverviewPanel(ctk.CTkFrame):
     def __init__(self, parent, controller):
-        super().__init__(parent, corner_radius=0, fg_color=COLORS["bg"])
+        super().__init__(parent, corner_radius=0, fg_color=PREMIUM_BG)
         self.controller = controller
         
-        # Scrollable container
         self.scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
         self.scroll.pack(fill="both", expand=True, padx=20, pady=20)
         
         # Header
-        hdr_frame = ctk.CTkFrame(self.scroll, fg_color="transparent")
+        hdr_frame = ctk.CTkFrame(self.scroll, fg_color="#12141E", corner_radius=12, border_width=1, border_color="#2A2E3F")
         hdr_frame.pack(fill="x", pady=(0, 20))
-        ctk.CTkLabel(hdr_frame, text="INSTITUTION OVERVIEW", font=FONTS["h1"], text_color=COLORS["accent"]).pack(side="left")
         
-        # Refresh Button
-        ctk.CTkButton(hdr_frame, text="↻ REFRESH DATA", width=120, fg_color="#222", text_color="white", command=self.refresh).pack(side="right")
+        self.lbl_title = ctk.CTkLabel(hdr_frame, text="🏦  Institutional Risk Intelligence", font=("Outfit", 24, "bold"), text_color="#00E5FF")
+        self.lbl_title.pack(side="left", padx=20, pady=15)
         
-        # Containers for dynamic content
-        self.summary_frame = ctk.CTkFrame(self.scroll, fg_color="transparent")
-        self.summary_frame.pack(fill="x", pady=(0, 20))
+        self.btn_refresh = ctk.CTkButton(hdr_frame, text="📸 Snapshot Data", width=130, fg_color="#1A1D2D", border_width=1, border_color="#2A2E3F", text_color="white", hover_color="#2A2E3F", corner_radius=6, font=("Inter", 13, "bold"), command=self.refresh)
+        self.btn_refresh.pack(side="right", padx=20, pady=15)
         
-        self.charts_frame = ctk.CTkFrame(self.scroll, fg_color="transparent")
-        self.charts_frame.pack(fill="x", pady=(0, 20))
+        self.main_frame = ctk.CTkFrame(self.scroll, fg_color="transparent")
+        self.main_frame.pack(fill="both", expand=True)
         
-        self.table_frame = ctk.CTkFrame(self.scroll, fg_color="#141414", corner_radius=8, border_width=1, border_color="#222")
-        self.table_frame.pack(fill="x", pady=(0, 20))
-        
-        self.trends_frame = ctk.CTkFrame(self.scroll, fg_color="transparent")
-        self.trends_frame.pack(fill="x", pady=(0, 20))
+        self._is_loading = False
 
     def on_show(self):
         self.refresh()
 
     def refresh(self):
-        for w in self.summary_frame.winfo_children(): w.destroy()
-        for w in self.charts_frame.winfo_children(): w.destroy()
-        for w in self.table_frame.winfo_children(): w.destroy()
-        for w in self.trends_frame.winfo_children(): w.destroy()
+        if self._is_loading: return
+        self._is_loading = True
+        self.btn_refresh.configure(state="disabled", text="↻ LOADING...")
         
-        erp_conf = self.controller.shared_data.get("erp_config")
-        if not erp_conf:
-            ctk.CTkLabel(self.summary_frame, text="Database configuration missing.", text_color=COLORS["danger"]).pack()
-            return
+        user_type = self.controller.shared_data.get("user_type")
+        if user_type == "HOD":
+            self.lbl_title.configure(text="🏦  Department Risk Intelligence")
+        else:
+            self.lbl_title.configure(text="🏦  Institutional Risk Intelligence")
             
+        for w in self.main_frame.winfo_children(): w.destroy()
+        
+        loading_lbl = ctk.CTkLabel(self.main_frame, text="Analyzing institution data... Please wait.", font=("Arial", 16, "bold"), text_color="#555")
+        loading_lbl.pack(pady=50)
+        
+        threading.Thread(target=self._fetch_data_thread, daemon=True).start()
+
+    def _fetch_data_thread(self):
         try:
+            erp_conf = self.controller.shared_data.get("erp_config")
+            if not erp_conf:
+                self.after(0, self._render_error, "Database configuration missing.")
+                return
+                
             db = DBHandler(erp_conf)
             predictor = AdvancedRiskPredictor(db)
             
             all_students = db.get_all_students()
+            
+            user_type = self.controller.shared_data.get("user_type")
+            assigned_dept = self.controller.shared_data.get("assigned_department")
+            
+            if user_type == "HOD" and assigned_dept:
+                all_students = [s for s in all_students if str(s.get("branch", "")) == str(assigned_dept)]
+                
             if not all_students:
-                ctk.CTkLabel(self.summary_frame, text="No student records found in the database.", text_color=COLORS["warning"]).pack()
+                self.after(0, self._render_error, "No student records found in the database.", COLORS.get("warning", "#FF9100"))
                 return
 
             branch_map = db.get_branch_map()
+            fallback_map = {"1": "CSE", "2": "ECE", "3": "MECH", "4": "EEE", "5": "IT", "6": "CIVIL", "7": "AIDS", "8": "AIML"}
             
-            # Analyze all students to build aggregates
-            total_students = len(all_students)
             risk_counts = {"High": 0, "Medium": 0, "Low": 0}
             dept_stats = {}
-            
             for s in all_students:
-                # Use engine to predict
                 report = predictor.analyze(s)
                 lvl = report.get("level", "Low")
                 risk_counts[lvl] += 1
                 
-                # Dept aggregates
-                b_id = str(s.get("branch_id", ""))
-                b_name = branch_map.get(b_id, b_id) or "Unknown"
+                b_id = str(s.get("branch", ""))
+                b_name = branch_map.get(b_id)
+                if not b_name: b_name = fallback_map.get(b_id, b_id)
+                if not b_name or b_name.strip() == "" or b_name == "None": b_name = "Unknown"
+                
                 if b_name not in dept_stats:
                     dept_stats[b_name] = {"Total": 0, "High": 0, "Medium": 0, "Low": 0, "att_sum": 0, "cgpa_sum": 0, "valid_cgpa": 0}
                 
@@ -88,132 +103,215 @@ class InstitutionOverviewPanel(ctk.CTkFrame):
                 if cgpa > 0:
                     ds["cgpa_sum"] += cgpa
                     ds["valid_cgpa"] += 1
+            
+            for d, s in dept_stats.items():
+                hr_pct = (s["High"] / s["Total"] * 100) if s["Total"] > 0 else 0
+                lr_pct = (s["Low"] / s["Total"] * 100) if s["Total"] > 0 else 0
+                att = s["att_sum"] / s["Total"] if s["Total"] > 0 else 0
+                cgpa_scaled = (s["cgpa_sum"] / s["valid_cgpa"] * 10) if s["valid_cgpa"] > 0 else 0
+                health = (lr_pct * 0.4) + (att * 0.4) + (cgpa_scaled * 0.2) - (hr_pct * 0.5)
+                s["health_score"] = max(0, min(100, health))
+            
+            worst_branch = max(dept_stats.keys(), key=lambda k: dept_stats[k]["High"] / dept_stats[k]["Total"] if dept_stats[k]["Total"] > 0 else 0) if dept_stats else "N/A"
+            best_branch = max(dept_stats.keys(), key=lambda k: dept_stats[k]["health_score"]) if dept_stats else "N/A"
 
-            # 1. Summary Cards
-            self.build_summary_cards(total_students, risk_counts)
+            data = {
+                "total_students": len(all_students),
+                "risk_counts": risk_counts,
+                "dept_stats": dept_stats,
+                "worst_branch": worst_branch,
+                "best_branch": best_branch
+            }
+                    
+            self.after(0, self._render_ui, data)
             
-            # 2. Risk Distribution Chart & Performance Overview
-            self.build_charts(risk_counts, dept_stats)
-            
-            # 3. Department Risk Comparison Table
-            self.build_department_table(dept_stats)
-            
-            # 4. Trends Analytics
-            self.build_trends_analytics()
-
         except Exception as e:
-            ctk.CTkLabel(self.summary_frame, text=f"Error loading institution data: {e}", text_color=COLORS["danger"]).pack()
             import traceback
             traceback.print_exc()
+            self.after(0, self._render_error, f"Error loading institution data: {e}")
 
-    def build_summary_cards(self, total, counts):
-        self.summary_frame.grid_columnconfigure((0,1,2,3), weight=1)
+    def _render_error(self, msg, color=COLORS.get("danger", "#FF5555")):
+        self._is_loading = False
+        self.btn_refresh.configure(state="normal", text="📸 Snapshot Data")
+        for w in self.main_frame.winfo_children(): w.destroy()
+        ctk.CTkLabel(self.main_frame, text=msg, font=("Arial", 14), text_color=color).pack(pady=20)
+
+    def _render_ui(self, data):
+        self._is_loading = False
+        self.btn_refresh.configure(state="normal", text="📸 Snapshot Data")
+        for w in self.main_frame.winfo_children(): w.destroy()
+        
+        # 1. Summary Cards
+        summary_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        summary_frame.pack(fill="x", pady=(0, 15))
+        self.build_summary_cards(summary_frame, data["total_students"], data["risk_counts"])
+        
+        # 2. Highlights
+        user_type = self.controller.shared_data.get("user_type")
+        if user_type != "HOD":
+            highlights_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+            highlights_frame.pack(fill="x", pady=(0, 20))
+            self.build_highlights_bar(highlights_frame, data["best_branch"], data["worst_branch"], data["dept_stats"])
+        
+        # 3. Two Panel Layout (Leaderboard + Risk Chart)
+        panels_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        panels_frame.pack(fill="both", expand=True)
+        panels_frame.grid_columnconfigure((0, 1), weight=1, uniform="cols")
+        
+        self.build_leaderboard(panels_frame, data["dept_stats"])
+        self.build_risk_chart(panels_frame, data["dept_stats"])
+
+    def _apply_hover_fx(self, widget, normal_color, hover_color):
+        def on_enter(e): widget.configure(fg_color=hover_color)
+        def on_leave(e): widget.configure(fg_color=normal_color)
+        widget.bind("<Enter>", on_enter)
+        widget.bind("<Leave>", on_leave)
+        for child in widget.winfo_children():
+            child.bind("<Enter>", on_enter)
+            child.bind("<Leave>", on_leave)
+
+    def build_summary_cards(self, parent, total, counts):
+        parent.grid_columnconfigure((0,1,2,3), weight=1)
         
         cards = [
-            ("Total Students", total, "white"),
-            ("Low Risk", counts["Low"], COLORS["success"]),
-            ("Medium Risk", counts["Medium"], COLORS["warning"]),
-            ("High Risk", counts["High"], COLORS["danger"])
+            ("TOTAL STUDENTS", total, "white"),
+            ("LOW RISK", counts["Low"], COLORS.get("success", "#00C853")),
+            ("MEDIUM RISK", counts["Medium"], COLORS.get("warning", "#FF9100")),
+            ("HIGH RISK", counts["High"], COLORS.get("danger", "#FF5555"))
         ]
         
         for i, (title, val, color) in enumerate(cards):
-            card = ctk.CTkFrame(self.summary_frame, fg_color="#1a1a1a", corner_radius=8, border_width=1, border_color="#333")
-            card.grid(row=0, column=i, padx=10, sticky="nsew")
-            ctk.CTkLabel(card, text=title, font=("Arial", 12), text_color="#888").pack(pady=(15, 5))
-            ctk.CTkLabel(card, text=str(val), font=("Arial", 28, "bold"), text_color=color).pack(pady=(0, 15))
+            # Outer frame acts as a subtle shadow/border
+            outer = ctk.CTkFrame(parent, fg_color="#181a26", corner_radius=14)
+            outer.grid(row=0, column=i, padx=8, sticky="nsew")
+            
+            card = ctk.CTkFrame(outer, fg_color=PREMIUM_CARD, corner_radius=12)
+            card.pack(fill="both", expand=True, padx=1, pady=1)
+            
+            self._apply_hover_fx(card, PREMIUM_CARD, PREMIUM_HOVER)
+            
+            strip = ctk.CTkFrame(card, width=4, fg_color=color, corner_radius=0)
+            strip.pack(side="left", fill="y", pady=10)
+            
+            content = ctk.CTkFrame(card, fg_color="transparent")
+            content.pack(side="left", fill="both", expand=True, padx=20, pady=10)
+            
+            ctk.CTkLabel(content, text=title, font=("Inter", 11, "bold"), text_color="#7A849C").pack(anchor="w")
+            ctk.CTkLabel(content, text=str(val), font=("Outfit", 26, "bold"), text_color=color).pack(anchor="w", pady=(2, 0))
 
-    def build_charts(self, risk_counts, dept_stats):
-        self.charts_frame.grid_columnconfigure((0,1), weight=1)
+    def build_highlights_bar(self, parent, best, worst, dept_stats):
+        parent.grid_columnconfigure((0,1), weight=1)
         
-        # Left Chart: Risk Distribution Donut
-        left_card = ctk.CTkFrame(self.charts_frame, fg_color="#141414", corner_radius=8, border_width=1, border_color="#222")
-        left_card.grid(row=0, column=0, padx=(0, 10), sticky="nsew")
-        ctk.CTkLabel(left_card, text="OVERALL RISK DISTRIBUTION", font=("Arial", 11, "bold"), text_color="#fff").pack(pady=(10, 0))
+        best_score = dept_stats[best]["health_score"] if best in dept_stats else 0
+        worst_stats = dept_stats.get(worst)
+        worst_pct = (worst_stats["High"] / worst_stats["Total"] * 100) if worst_stats and worst_stats["Total"] > 0 else 0
         
-        fig1 = Figure(figsize=(4, 3), dpi=100)
-        fig1.patch.set_facecolor("#141414")
-        ax1 = fig1.add_subplot(111)
+        hls = [
+            ("🏆 HEALTHIEST DEPARTMENT", f"{best}  (Score: {best_score:.1f})", COLORS.get("success", "#00C853"), 0),
+            ("⚠️ MOST AT-RISK DEPARTMENT", f"{worst}  ({worst_pct:.1f}% High Risk)", COLORS.get("danger", "#FF5555"), 1)
+        ]
         
-        labels = ["High", "Medium", "Low"]
-        sizes = [risk_counts["High"], risk_counts["Medium"], risk_counts["Low"]]
-        colors = [COLORS["danger"], COLORS["warning"], COLORS["success"]]
-        
-        if sum(sizes) > 0:
-            wedges, texts, autotexts = ax1.pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', startangle=90, pctdistance=0.75)
-            for t in texts: t.set_color("white")
-            for at in autotexts: at.set_color("black"); at.set_weight("bold")
-            # Draw circle for donut
-            centre_circle = fig1.gca().add_artist(Figure.patch.Circle((0,0),0.50,fc='#141414'))
-        
-        canvas1 = FigureCanvasTkAgg(fig1, master=left_card)
-        canvas1.get_tk_widget().pack(fill="both", expand=True, padx=10, pady=10)
-        
-        # Right Chart: Branch Performance (Avg Attendance & CGPA)
-        right_card = ctk.CTkFrame(self.charts_frame, fg_color="#141414", corner_radius=8, border_width=1, border_color="#222")
-        right_card.grid(row=0, column=1, padx=(10, 0), sticky="nsew")
-        ctk.CTkLabel(right_card, text="DEPARTMENT PERFORMANCE", font=("Arial", 11, "bold"), text_color="#fff").pack(pady=(10, 0))
-        
-        depts = list(dept_stats.keys())
-        att_avgs = [ds["att_sum"]/ds["Total"] if ds["Total"]>0 else 0 for ds in dept_stats.values()]
-        cgpa_avgs = [ds["cgpa_sum"]/ds["valid_cgpa"] if ds["valid_cgpa"]>0 else 0 for ds in dept_stats.values()]
-        
-        fig2 = Figure(figsize=(5, 3), dpi=100)
-        fig2.patch.set_facecolor("#141414")
-        ax2 = fig2.add_subplot(111)
-        ax2.set_facecolor("#141414")
-        
-        if depts:
-            x = range(len(depts))
-            ax2.bar([i-0.2 for i in x], att_avgs, width=0.4, color=COLORS["accent"], label="Avg Attendance %")
-            # Scale CGPA to 100 for visual comparison
-            ax2.bar([i+0.2 for i in x], [c*10 for c in cgpa_avgs], width=0.4, color="#4ADE80", label="Avg CGPA (x10)")
-            ax2.set_xticks(list(x))
-            ax2.set_xticklabels(depts, color="white", rotation=15, ha="right", fontsize=8)
-            ax2.tick_params(axis='y', colors='white')
-            ax2.legend(facecolor="#1a1a1a", edgecolor="#333", labelcolor="white", fontsize=8)
-        
-        canvas2 = FigureCanvasTkAgg(fig2, master=right_card)
-        canvas2.get_tk_widget().pack(fill="both", expand=True, padx=10, pady=10)
+        for title, val, color, col in hls:
+            outer = ctk.CTkFrame(parent, fg_color="#181a26", corner_radius=14)
+            outer.grid(row=0, column=col, padx=8, sticky="nsew")
+            
+            card = ctk.CTkFrame(outer, fg_color=PREMIUM_CARD, corner_radius=12)
+            card.pack(fill="both", expand=True, padx=1, pady=1)
+            self._apply_hover_fx(card, PREMIUM_CARD, PREMIUM_HOVER)
+            
+            content = ctk.CTkFrame(card, fg_color="transparent")
+            content.pack(fill="both", expand=True, padx=25, pady=12)
+            
+            ctk.CTkLabel(content, text=title, font=("Inter", 11, "bold"), text_color=color).pack(anchor="w")
+            ctk.CTkLabel(content, text=val, font=("Outfit", 18, "bold"), text_color="white").pack(anchor="w", pady=(2, 0))
 
-    def build_department_table(self, dept_stats):
-        ctk.CTkLabel(self.table_frame, text="DEPARTMENT RISK COMPARISON", font=("Arial", 12, "bold"), text_color=COLORS["accent"]).pack(anchor="w", padx=20, pady=(15, 10))
+    def build_leaderboard(self, parent, dept_stats):
+        outer = ctk.CTkFrame(parent, fg_color="#181a26", corner_radius=14)
+        outer.grid(row=0, column=0, sticky="nsew", padx=(8, 10))
         
-        # Sort by High Risk Percentage
-        dept_list = []
-        for d, s in dept_stats.items():
-            hr_pct = (s["High"] / s["Total"] * 100) if s["Total"] > 0 else 0
-            dept_list.append((d, s, hr_pct))
-        dept_list.sort(key=lambda x: x[2], reverse=True)
+        left_panel = ctk.CTkFrame(outer, fg_color=PREMIUM_CARD, corner_radius=12)
+        left_panel.pack(fill="both", expand=True, padx=1, pady=1)
         
-        # Headers
-        hdr_row = ctk.CTkFrame(self.table_frame, fg_color="#1a1a1a")
-        hdr_row.pack(fill="x", padx=10, pady=(0, 5))
+        ctk.CTkLabel(left_panel, text="Department Health Leaderboard", font=("Outfit", 18, "bold"), text_color="white").pack(anchor="w", padx=25, pady=(25, 15))
         
-        cols = [("DEPARTMENT", 200), ("TOTAL STUDENTS", 150), ("HIGH RISK", 120), ("MEDIUM RISK", 120), ("LOW RISK", 120)]
-        for text, width in cols:
-            ctk.CTkLabel(hdr_row, text=text, font=("Arial", 10, "bold"), text_color="#888", width=width, anchor="w").pack(side="left", padx=10, pady=5)
+        dept_list = [(d, s) for d, s in dept_stats.items()]
+        dept_list.sort(key=lambda x: x[1]["health_score"], reverse=True)
+        
+        lb_scroll = ctk.CTkFrame(left_panel, fg_color="transparent")
+        lb_scroll.pack(fill="both", expand=True, padx=15, pady=(0, 20))
+        
+        for i, (d, s) in enumerate(dept_list):
+            row = ctk.CTkFrame(lb_scroll, fg_color="transparent")
+            row.pack(fill="x", padx=10, pady=12)
+            self._apply_hover_fx(row, "transparent", "#1A1D2D")
             
-        # Rows
-        for d, s, hr_pct in dept_list:
-            row = ctk.CTkFrame(self.table_frame, fg_color="transparent")
-            row.pack(fill="x", padx=10, pady=2)
+            h_score = s['health_score']
+            prog_color = COLORS.get("success", "#00C853") if h_score > 70 else (COLORS.get("warning", "#FF9100") if h_score > 40 else COLORS.get("danger", "#FF5555"))
             
-            ctk.CTkLabel(row, text=d, font=("Arial", 11, "bold"), text_color="white", width=200, anchor="w").pack(side="left", padx=10)
-            ctk.CTkLabel(row, text=str(s["Total"]), font=("Arial", 11), text_color="#ccc", width=150, anchor="w").pack(side="left", padx=10)
+            rank_text = f"#{i+1}  {d}"
+            ctk.CTkLabel(row, text=rank_text, font=("Inter", 15, "bold"), text_color="#00E5FF", width=100, anchor="w").pack(side="left")
             
-            hr_txt = f"{s['High']} ({hr_pct:.1f}%)"
-            ctk.CTkLabel(row, text=hr_txt, font=("Arial", 11, "bold"), text_color=COLORS["danger"], width=120, anchor="w").pack(side="left", padx=10)
-            ctk.CTkLabel(row, text=str(s["Medium"]), font=("Arial", 11), text_color=COLORS["warning"], width=120, anchor="w").pack(side="left", padx=10)
-            ctk.CTkLabel(row, text=str(s["Low"]), font=("Arial", 11), text_color=COLORS["success"], width=120, anchor="w").pack(side="left", padx=10)
+            # Dynamic Health Bar
+            prog = ctk.CTkProgressBar(row, width=150, height=8, corner_radius=4, progress_color=prog_color, fg_color="#2A2E3F")
+            prog.pack(side="left", padx=(15, 20))
+            prog.set(h_score / 100.0)
             
-        ctk.CTkFrame(self.table_frame, height=10, fg_color="transparent").pack()
+            score_text = f"{int(h_score)}/100"
+            ctk.CTkLabel(row, text=score_text, font=("Inter", 15, "bold"), text_color=prog_color).pack(side="right")
 
-    def build_trends_analytics(self):
-        trend_card = ctk.CTkFrame(self.trends_frame, fg_color="#141414", corner_radius=8, border_width=1, border_color="#222")
-        trend_card.pack(fill="x")
+    def build_risk_chart(self, parent, dept_stats):
+        outer = ctk.CTkFrame(parent, fg_color="#181a26", corner_radius=14)
+        outer.grid(row=0, column=1, sticky="nsew", padx=(10, 8))
         
-        ctk.CTkLabel(trend_card, text="SEMESTER-WISE RISK TRENDS", font=("Arial", 12, "bold"), text_color=COLORS["accent"]).pack(anchor="w", padx=20, pady=(15, 5))
+        right_panel = ctk.CTkFrame(outer, fg_color=PREMIUM_CARD, corner_radius=12)
+        right_panel.pack(fill="both", expand=True, padx=1, pady=1)
         
-        # Graceful message since historical data spans might not be fully populated in generic schemas
-        msg = "Historical semester-by-semester records are currently being aggregated. Live prediction tracking is active."
-        ctk.CTkLabel(trend_card, text=msg, font=("Arial", 11), text_color="#888").pack(anchor="w", padx=20, pady=(0, 20))
+        ctk.CTkLabel(right_panel, text="Department Risk Distribution", font=("Outfit", 18, "bold"), text_color="white").pack(anchor="w", padx=25, pady=(25, 15))
+        
+        # Legend
+        leg_frame = ctk.CTkFrame(right_panel, fg_color="transparent")
+        leg_frame.pack(fill="x", padx=25, pady=(0, 20))
+        for text, col in [("Low", COLORS.get("success", "#00C853")), ("Medium", COLORS.get("warning", "#FF9100")), ("High", COLORS.get("danger", "#FF5555"))]:
+            f = ctk.CTkFrame(leg_frame, fg_color="transparent")
+            f.pack(side="left", padx=(0, 20))
+            ctk.CTkFrame(f, width=12, height=12, corner_radius=6, fg_color=col).pack(side="left", padx=(0, 8))
+            ctk.CTkLabel(f, text=text, font=("Inter", 12), text_color="#aaa").pack(side="left")
+        
+        dept_list = [(d, s) for d, s in dept_stats.items()]
+        # Sort by total students for visual appeal
+        dept_list.sort(key=lambda x: x[1]["Total"], reverse=True)
+        max_students = max([s["Total"] for _, s in dept_list]) if dept_list else 1
+        
+        chart_scroll = ctk.CTkFrame(right_panel, fg_color="transparent")
+        chart_scroll.pack(fill="both", expand=True, padx=15, pady=(0, 20))
+        
+        # Native CTk Stacked Bar Generation
+        BAR_CONTAINER_WIDTH = 380
+        for d, s in dept_list:
+            row = ctk.CTkFrame(chart_scroll, fg_color="transparent")
+            row.pack(fill="x", padx=10, pady=12)
+            self._apply_hover_fx(row, "transparent", "#1A1D2D")
+            
+            ctk.CTkLabel(row, text=d, font=("Inter", 14, "bold"), text_color="#00E5FF", width=70, anchor="e").pack(side="left", padx=(0, 15))
+            
+            bar_container = ctk.CTkFrame(row, fg_color="transparent", width=BAR_CONTAINER_WIDTH, height=18)
+            bar_container.pack(side="left", fill="x", expand=True)
+            bar_container.pack_propagate(False)
+            
+            # Ensure bar scales gracefully with a little padding room
+            scale = (BAR_CONTAINER_WIDTH - 10) / max_students if max_students > 0 else 0
+            
+            w_green = int(s["Low"] * scale)
+            w_orange = int(s["Medium"] * scale)
+            w_red = int(s["High"] * scale)
+            
+            # To simulate rounded inner corners beautifully, we just pack frames side by side.
+            if w_green > 0:
+                ctk.CTkFrame(bar_container, fg_color=COLORS.get("success", "#00C853"), width=w_green, height=18, corner_radius=4).pack(side="left", padx=(0, 2))
+            if w_orange > 0:
+                ctk.CTkFrame(bar_container, fg_color=COLORS.get("warning", "#FF9100"), width=w_orange, height=18, corner_radius=4).pack(side="left", padx=(0, 2))
+            if w_red > 0:
+                ctk.CTkFrame(bar_container, fg_color=COLORS.get("danger", "#FF5555"), width=w_red, height=18, corner_radius=4).pack(side="left")
+            
+            # Subtle total label
+            ctk.CTkLabel(row, text=str(s["Total"]), font=("Inter", 12, "bold"), text_color="#7A849C").pack(side="right", padx=(10, 0))
