@@ -1,6 +1,6 @@
 import customtkinter as ctk
 
-class WelcomeScreen(ctk.CTkFrame):
+class HeroScreen(ctk.CTkFrame):
     def __init__(self, parent, controller):
         super().__init__(parent)
         self.controller = controller
@@ -27,7 +27,7 @@ class WelcomeScreen(ctk.CTkFrame):
                                fg_color="transparent", 
                                border_color="#ffffff", 
                                text_color="#ffffff",
-                               hover_color="#1a1a1a",
+                               hover_color=COLORS["card"],
                                cmd=lambda: self.safe_switch("Admin"))
         
         # Spacer

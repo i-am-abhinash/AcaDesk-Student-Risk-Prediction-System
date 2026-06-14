@@ -1,25 +1,31 @@
 from sqlalchemy import create_engine, text
 import sqlite3
+import os
 
 class DBManager:
     def __init__(self):
         self.engine = None
-        self.conn_string = "sqlite:///risk_system.db"  # Default to local DB
-        self.init_local_db()
+        self.central_db = "acadesk_central.db"
+        self.init_central_db()
 
-    def init_local_db(self):
-        """Creates the local settings database (SQLite)"""
-        # We use raw sqlite3 for the local config to ensure it always works
-        conn = sqlite3.connect("risk_system.db")
+    def init_central_db(self):
+        """Creates the AcaDesk Central Database (SQLite)"""
+        conn = sqlite3.connect(self.central_db)
         cursor = conn.cursor()
-        # Admin Table
+        
+        # Application Configuration and Users
         cursor.execute('''CREATE TABLE IF NOT EXISTS admins (username TEXT, password TEXT)''')
-        # Faculty Table
         cursor.execute('''CREATE TABLE IF NOT EXISTS faculty (username TEXT, password TEXT, is_temp INT)''')
-        # Config Table (Stores the connection string for the College ERP)
         cursor.execute('''CREATE TABLE IF NOT EXISTS app_config (erp_connection_string TEXT, is_setup INT)''')
         
-        # Create Default Admin (user: admin, pass: admin)
+        # Central Intelligence & Intervention Data
+        cursor.execute('''CREATE TABLE IF NOT EXISTS faculty_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, faculty_id TEXT, student_id TEXT, note TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS ai_recommendations (id INTEGER PRIMARY KEY AUTOINCREMENT, student_id TEXT, recommendation TEXT, status TEXT, generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS student_timeline (id INTEGER PRIMARY KEY AUTOINCREMENT, student_id TEXT, event_type TEXT, description TEXT, event_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS audit_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, action TEXT, details TEXT, log_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS parent_notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, student_id TEXT, message TEXT, sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+        
+        # Create Default Admin
         cursor.execute("SELECT * FROM admins")
         if not cursor.fetchone():
             cursor.execute("INSERT INTO admins VALUES ('admin', 'admin')")
@@ -28,8 +34,8 @@ class DBManager:
         conn.close()
 
     def get_erp_engine(self):
-        """Fetches the ERP connection string from local DB and creates an engine"""
-        conn = sqlite3.connect("risk_system.db")
+        """Fetches the ERP connection string and creates a Read-Only engine"""
+        conn = sqlite3.connect(self.central_db)
         cursor = conn.cursor()
         cursor.execute("SELECT erp_connection_string FROM app_config WHERE is_setup=1")
         result = cursor.fetchone()
@@ -37,13 +43,16 @@ class DBManager:
 
         if result:
             try:
-                # result[0] contains the connection string (e.g., mysql://...)
                 self.engine = create_engine(result[0])
                 return self.engine
             except Exception as e:
                 print(f"ERP Connection Error: {e}")
                 return None
         return None
+
+    def get_central_connection(self):
+        """Returns connection to the Read/Write AcaDesk Central Database"""
+        return sqlite3.connect(self.central_db)
 
     def save_erp_config(self, db_type, host, port, user, password, dbname):
         """Saves the connection string based on user input"""
@@ -56,11 +65,9 @@ class DBManager:
         else:
             conn_str = f"sqlite:///{dbname}"
 
-        conn = sqlite3.connect("risk_system.db")
+        conn = sqlite3.connect(self.central_db)
         cursor = conn.cursor()
-        # clear old config
         cursor.execute("DELETE FROM app_config")
-        # insert new
         cursor.execute("INSERT INTO app_config VALUES (?, 1)", (conn_str,))
         conn.commit()
         conn.close()

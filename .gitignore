@@ -1,0 +1,16 @@
+venv/
+__pycache__/
+*.pyc
+build/
+dist/
+*.exe
+*.pkg
+*.pyz
+.env
+secret.key
+*.db
+*.sqlite
+*.sqlite3
+*.csv
+*.txt
+*.pkl
