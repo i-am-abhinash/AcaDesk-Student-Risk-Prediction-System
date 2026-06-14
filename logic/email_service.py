@@ -1,14 +1,14 @@
-import smtplib
+import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 class EmailService:
     def __init__(self):
-        # We use the explicitly provided credentials by the user
-        self.smtp_server = "smtp.gmail.com"
-        self.smtp_port = 587
-        self.sender_email = "gowriabhinash1919@gmail.com"
-        self.sender_password = "NAAKU TELIDHU19"
+        # We use the explicitly provided credentials by the user via environment variables
+        self.smtp_server = os.environ.get("SMTP_SERVER", "smtp.gmail.com")
+        self.smtp_port = int(os.environ.get("SMTP_PORT", 587))
+        self.sender_email = os.environ.get("SMTP_EMAIL", "test@example.com")
+        self.sender_password = os.environ.get("SMTP_PASSWORD", "")
 
     def send_early_warning_alert(self, to_emails, student_name, student_id, college_name, risk_level, dominant_factor):
         """

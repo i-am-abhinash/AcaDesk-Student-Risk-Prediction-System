@@ -20,11 +20,7 @@ class InstitutionalAnalytics:
             all_students = [s for s in all_students if str(s.get('branch')) == str(target_branch_id)]
             branch_map = {name: bid for name, bid in branch_map.items() if str(bid) == str(target_branch_id)}
         
-        with open("debug_institutional.txt", "w") as f:
-            f.write(f"All students count: {len(all_students)}\n")
-            f.write(f"Branch map: {branch_map}\n")
-            if all_students:
-                f.write(f"First student sample: {all_students[0]}\n")
+        # Removed debug log file writing
         
         if not all_students:
             return None

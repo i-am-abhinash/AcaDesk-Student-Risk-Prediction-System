@@ -44,7 +44,7 @@ class ModernAskYesNo(ctk.CTkToplevel):
         self.geometry(f"{width}x{height}+{x}+{y}")
         self.resizable(False, False)
         self.attributes("-topmost", True)
-        self.configure(fg_color="#1a1a1a")
+        self.configure(fg_color=COLORS["card"])
         self.protocol("WM_DELETE_WINDOW", self.close)
 
         ctk.CTkFrame(self, fg_color=COLORS["warning"], height=5).pack(fill="x", side="top")
@@ -124,30 +124,72 @@ class RiskAnalysisApp(ctk.CTk):
 
         self.container = ctk.CTkFrame(self)
         self.container.pack(side="top", fill="both", expand=True)
-        self.container.grid_rowconfigure(0, weight=1)
-        self.container.grid_columnconfigure(0, weight=1)
 
         self.frames = {}
         for F in (WelcomeScreen, RegisterScreen, DashboardScreen, LoginScreen):
             page_name = F.__name__
             frame = F(parent=self.container, controller=self)
             self.frames[page_name] = frame
-            frame.grid(row=0, column=0, sticky="nsew")
+            # Instead of grid, we'll use place() dynamically, but initially we hide them
+            # frame.grid(row=0, column=0, sticky="nsew")
 
         erp = ERPWizard(self.container, self, self.frames["DashboardScreen"])
         self.frames["ERPWizard"] = erp
-        erp.grid(row=0, column=0, sticky="nsew")
+
+        self.current_page = None
+        self.is_animating = False
 
         self.show_frame("WelcomeScreen")
+        self.after(100, lambda: self.state("zoomed"))
 
     def show_frame(self, page_name, **kwargs):
+        if self.is_animating or self.current_page == page_name:
+            return
+
         if kwargs:
             for k, v in kwargs.items():
                 self.shared_data[k] = v
-        frame = self.frames[page_name]
-        frame.tkraise()
-        if hasattr(frame, "on_show"):
-            frame.on_show()
+                
+        new_frame = self.frames[page_name]
+
+        if self.current_page is None:
+            # First load, no animation
+            new_frame.place(relx=0, rely=0, relwidth=1, relheight=1)
+            self.current_page = page_name
+            if hasattr(new_frame, "on_show"):
+                new_frame.on_show()
+            return
+
+        old_frame = self.frames[self.current_page]
+        self.is_animating = True
+
+        # Position new frame off-screen to the right
+        new_frame.place(relx=1, rely=0, relwidth=1, relheight=1)
+        new_frame.tkraise()
+
+        self.animate_transition(old_frame, new_frame, 0, page_name)
+
+    def animate_transition(self, old_frame, new_frame, step, page_name):
+        speed = 0.08  # Adjust for faster/slower animation
+        step += speed
+        if step >= 1.0:
+            step = 1.0
+
+        # Ease-out cubic for a smooth snap effect
+        ease = 1 - pow(1 - step, 3)
+
+        # Slide old frame to left, new frame from right
+        old_frame.place(relx=-ease, rely=0, relwidth=1, relheight=1)
+        new_frame.place(relx=1 - ease, rely=0, relwidth=1, relheight=1)
+
+        if step < 1.0:
+            self.after(16, lambda: self.animate_transition(old_frame, new_frame, step, page_name))
+        else:
+            old_frame.place_forget()
+            self.current_page = page_name
+            self.is_animating = False
+            if hasattr(new_frame, "on_show"):
+                new_frame.on_show()
 
 # ==========================================
 # SCREEN 1: LOGIN (Welcome Screen built-in)
@@ -186,16 +228,17 @@ class WelcomeScreen(ctk.CTkFrame):
         right_frame = ctk.CTkFrame(self, fg_color="transparent")
         right_frame.place(relx=0.4, rely=0, relwidth=0.6, relheight=1)
 
-        self.login_box = ctk.CTkFrame(right_frame, fg_color="#12141E", width=400, height=500, corner_radius=16, border_width=1, border_color="#2A2E3F")
+        self.login_box = ctk.CTkFrame(right_frame, fg_color="#12141E", width=360, height=480, corner_radius=16, border_width=1, border_color="#2A2E3F")
         self.login_box.place(relx=0.5, rely=0.6, anchor="center") # Start lower for animation
+        self.login_box.pack_propagate(False)
 
         ctk.CTkLabel(self.login_box, text="SECURE LOGIN", font=("Outfit", 24, "bold"), text_color="#00E5FF").pack(pady=(40, 30))
 
         self.entry_user = ctk.CTkEntry(self.login_box, placeholder_text="Username", width=300, height=45, fg_color="#1A1D2D", border_width=1, border_color="#2A2E3F", corner_radius=8, font=("Inter", 14), text_color="white")
-        self.entry_user.pack(pady=10)
+        self.entry_user.pack(pady=10, padx=30)
 
         self.entry_pass = ctk.CTkEntry(self.login_box, placeholder_text="Password", show="*", width=300, height=45, fg_color="#1A1D2D", border_width=1, border_color="#2A2E3F", corner_radius=8, font=("Inter", 14), text_color="white")
-        self.entry_pass.pack(pady=10)
+        self.entry_pass.pack(pady=10, padx=30)
         self.entry_pass.bind("<Return>", lambda event: self.login_logic())
 
         self.role_var = ctk.StringVar(value="Faculty")

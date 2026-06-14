@@ -72,7 +72,7 @@ class DepartmentDrillDown(ctk.CTkToplevel):
                 driver_name = str(driver)
                 impact = "High Impact"
                 
-            d_row = ctk.CTkFrame(shap_frame, fg_color="#1a1a1a")
+            d_row = ctk.CTkFrame(shap_frame, fg_color=COLORS["card"])
             d_row.pack(fill="x", padx=15, pady=5)
             ctk.CTkLabel(d_row, text=f"• {driver_name}", text_color="white", font=("Arial", 14)).pack(side="left", padx=10, pady=8)
             ctk.CTkLabel(d_row, text=impact, text_color=COLORS["danger"], font=("Arial", 14, "bold")).pack(side="right", padx=10, pady=8)

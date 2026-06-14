@@ -27,7 +27,7 @@ class HeroScreen(ctk.CTkFrame):
                                fg_color="transparent", 
                                border_color="#ffffff", 
                                text_color="#ffffff",
-                               hover_color="#1a1a1a",
+                               hover_color=COLORS["card"],
                                cmd=lambda: self.safe_switch("Admin"))
         
         # Spacer

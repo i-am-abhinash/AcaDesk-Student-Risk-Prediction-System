@@ -153,7 +153,7 @@ class ERPSetupScreen(ctk.CTkFrame):
         preview.configure(fg_color=COLORS["bg"])
         ctk.CTkLabel(preview, text="Detected Student Records", font=FONTS["h2"], text_color=COLORS["accent"]).pack(pady=15)
         # Table header
-        header = ctk.CTkFrame(preview, fg_color="#1A1A1A")
+        header = ctk.CTkFrame(preview, fg_color=COLORS["card"])
         header.pack(fill="x", padx=20)
         for col in ["Student Name", "Roll Number", "Department"]:
             ctk.CTkLabel(header, text=col, font=FONTS["body"], text_color=COLORS["text"], width=180).pack(side="left", padx=5, pady=5)

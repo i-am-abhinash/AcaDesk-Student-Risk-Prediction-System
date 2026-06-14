@@ -310,11 +310,37 @@ class AdvancedRiskPredictor:
         }
 
     def batch_analyze(self, students: list[dict]):
-        counts = {"High": 0, "Medium": 0, "Low": 0}
+        standard_students = []
+        first_year_students = []
         for s in students:
-            res = self.analyze(s)
-            counts[res["level"]] += 1
-        return counts, {}
+            yr_str = str(s.get("year") or s.get("syear") or s.get("current_year") or "2").lower()
+            if "1" in yr_str or "first" in yr_str:
+                first_year_students.append(s)
+            else:
+                standard_students.append(s)
+                
+        global_stats = {"High": 0, "Medium": 0, "Low": 0}
+        branch_stats = {}
+        
+        if standard_students:
+            from logic.predictor import RiskPredictor
+            rp = RiskPredictor()
+            g_std, b_std = rp.batch_analyze(standard_students)
+            for k in global_stats: global_stats[k] += g_std.get(k, 0)
+            for b, stats in b_std.items():
+                if b not in branch_stats: branch_stats[b] = {"High": 0, "Medium": 0, "Low": 0}
+                for k in branch_stats[b]: branch_stats[b][k] += stats.get(k, 0)
+                
+        if first_year_students:
+            from logic.first_year_predictor import FirstYearPredictor
+            fp = FirstYearPredictor()
+            g_fy, b_fy = fp.batch_analyze(first_year_students)
+            for k in global_stats: global_stats[k] += g_fy.get(k, 0)
+            for b, stats in b_fy.items():
+                if b not in branch_stats: branch_stats[b] = {"High": 0, "Medium": 0, "Low": 0}
+                for k in branch_stats[b]: branch_stats[b][k] += stats.get(k, 0)
+                
+        return global_stats, branch_stats
 
     def get_model_evaluation_metrics(self) -> dict:
         """

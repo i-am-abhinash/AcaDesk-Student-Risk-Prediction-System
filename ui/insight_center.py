@@ -48,7 +48,7 @@ class InsightCenter(ctk.CTkFrame):
         ctk.CTkButton(load_f, text="LOAD DATA", width=90, fg_color="#222", font=FONTS["caption"], command=self.load_real_student).pack(side="left")
 
         # Student Context Panel
-        self.context_card = ctk.CTkFrame(self.scroll, fg_color="#1a1a1a", corner_radius=8, border_width=1, border_color="#333")
+        self.context_card = ctk.CTkFrame(self.scroll, fg_color=COLORS["card"], corner_radius=8, border_width=1, border_color=COLORS["border"])
         self.context_card.pack(fill="x", pady=(0, 10))
         self.lbl_context = ctk.CTkLabel(self.context_card, text="No Student Loaded. Adjust sliders below for global scenario simulation.", font=FONTS["body"], text_color="#888")
         self.lbl_context.pack(padx=20, pady=12, anchor="w")
@@ -316,7 +316,7 @@ class InsightCenter(ctk.CTkFrame):
             ctk.CTkLabel(self.history_scroll, text="No significant historical patterns detected.", text_color="#888").pack(anchor="w")
             
         for title, trend, insight, color in patterns:
-            card = ctk.CTkFrame(self.history_scroll, fg_color="#1a1a1a", corner_radius=6)
+            card = ctk.CTkFrame(self.history_scroll, fg_color=COLORS["card"], corner_radius=6)
             card.pack(fill="x", pady=4)
             
             top = ctk.CTkFrame(card, fg_color="transparent")
@@ -349,7 +349,7 @@ class InsightCenter(ctk.CTkFrame):
             
         for act, new_score in forecasts:
             diff = current_score - new_score
-            card = ctk.CTkFrame(self.forecast_scroll, fg_color="#1a1a1a", corner_radius=6)
+            card = ctk.CTkFrame(self.forecast_scroll, fg_color=COLORS["card"], corner_radius=6)
             card.pack(fill="x", pady=4)
             
             top = ctk.CTkFrame(card, fg_color="transparent")
@@ -371,7 +371,7 @@ class InsightCenter(ctk.CTkFrame):
         # 1. Natural Language Report
         nlg_text = report.get("nlg_report", "")
         if nlg_text:
-            nlg_card = ctk.CTkFrame(self.rec_scroll, fg_color="#1a1a1a", corner_radius=6, border_width=1, border_color="#333")
+            nlg_card = ctk.CTkFrame(self.rec_scroll, fg_color=COLORS["card"], corner_radius=6, border_width=1, border_color=COLORS["border"])
             nlg_card.pack(fill="x", pady=(0, 10))
             ctk.CTkLabel(nlg_card, text="AI Analysis Summary", font=FONTS["caption"], text_color="#00E5FF").pack(anchor="w", padx=15, pady=(10, 2))
             ctk.CTkLabel(nlg_card, text=nlg_text, font=FONTS["caption"], text_color="#ccc", wraplength=420, justify="left").pack(anchor="w", padx=15, pady=(2, 10))
@@ -398,7 +398,7 @@ class InsightCenter(ctk.CTkFrame):
                 out = "Improve academic standing."
                 pri = 3
                 
-            card = ctk.CTkFrame(self.rec_scroll, fg_color="#1a1a1a", corner_radius=6)
+            card = ctk.CTkFrame(self.rec_scroll, fg_color=COLORS["card"], corner_radius=6)
             card.pack(fill="x", pady=4)
             
             top_row = ctk.CTkFrame(card, fg_color="transparent")
@@ -891,7 +891,7 @@ class RiskIntelligenceDashboard(ctk.CTkFrame):
         ]
         
         for act, res, diff in forecasts:
-            row = ctk.CTkFrame(forecast_card, fg_color="#1a1a1a")
+            row = ctk.CTkFrame(forecast_card, fg_color=COLORS["card"])
             row.pack(fill="x", padx=15, pady=3)
             ctk.CTkLabel(row, text=f"Scenario: {act}", font=FONTS["caption"], text_color="white", anchor="w").pack(side="left", padx=10, pady=8)
             
@@ -964,13 +964,13 @@ class RiskIntelligenceDashboard(ctk.CTkFrame):
             completed = sum(1 for t in tracked if t['status'] == 'Completed')
             effectiveness = (completed / len(tracked)) * 100 if len(tracked) > 0 else 0
             
-            eff_card = ctk.CTkFrame(tracker_card, fg_color="#1a1a1a")
+            eff_card = ctk.CTkFrame(tracker_card, fg_color=COLORS["card"])
             eff_card.pack(fill="x", padx=15, pady=(0, 10))
             ctk.CTkLabel(eff_card, text=f"Effectiveness Score: {effectiveness:.0f}%", font=FONTS["body"], text_color=COLORS["success"] if effectiveness > 50 else COLORS["warning"]).pack(side="left", padx=10, pady=5)
             ctk.CTkLabel(eff_card, text=f"({completed}/{len(tracked)} Resolved)", font=FONTS["badge"], text_color="#888").pack(side="right", padx=10, pady=5)
 
             for t in tracked:
-                t_row = ctk.CTkFrame(tracked_scroll, fg_color="#1a1a1a", corner_radius=6)
+                t_row = ctk.CTkFrame(tracked_scroll, fg_color=COLORS["card"], corner_radius=6)
                 t_row.pack(fill="x", pady=2)
                 
                 ctk.CTkLabel(t_row, text=t['recommendation_text'], font=FONTS["caption"], text_color="white", wraplength=250, justify="left").pack(side="left", padx=10, pady=8)

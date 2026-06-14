@@ -2,16 +2,17 @@
 
 # --- COLOR PALETTE ---
 COLORS = {
-    "bg": "#000000",             # Main Background
-    "sidebar": "#111111",        # Sidebar Background
-    "card": "#1a1a1a",           # Card/Box Background
+    "bg": "#0B0E14",             # Main Background
+    "sidebar": "#12141E",        # Sidebar Background
+    "card": "#151A22",           # Card/Box Background
+    "border": "#2A2E3F",         # Border Color
     "accent": "#00E5FF",         # Cyan Highlight
     "text": "#FFFFFF",           # Main Text
-    "text_gray": "gray",         # Subtitle Text
-    "danger": "#FF5555",         # Red (High Risk)
-    "warning": "#FF9100",        # Orange (Med Risk)
-    "success": "#00C853",        # Green (Safe)
-    "input_bg": "#1F1F1F",       # Entry Box Background
+    "text_gray": "#8B949E",      # Subtitle Text
+    "danger": "#FF1744",         # Red (High Risk)
+    "warning": "#FFEA00",        # Yellow/Orange (Med Risk)
+    "success": "#00E676",        # Green (Safe)
+    "input_bg": "#1A1D2D",       # Entry Box Background
 }
 
 # --- FONTS ---
