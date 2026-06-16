@@ -196,7 +196,7 @@ class AdvancedInsightsPanel(ctk.CTkFrame):
         }
         
         def trigger_calc(*args):
-            from logic.predictor import RiskPredictor
+            from logic.risk_engine import AdvancedRiskPredictor
             features = {
                 "attendance": vars_dict["attendance"].get(),
                 "cgpa": vars_dict["cgpa"].get() / 10.0,
@@ -207,9 +207,10 @@ class AdvancedInsightsPanel(ctk.CTkFrame):
                 "lab_performance": vars_dict["lab_performance"].get(),
                 "mid_exam_score": vars_dict["mid_exam_score"].get(),
                 "consecutive_absences": vars_dict["consecutive_absences"].get(),
-                "leave_frequency": vars_dict["leave_frequency"].get()
+                "leave_frequency": vars_dict["leave_frequency"].get(),
+                "year": "2"
             }
-            res = RiskPredictor().analyze_student(features, 7)
+            res = AdvancedRiskPredictor().analyze(features)
             
             level = res['level']
             if level == "High":

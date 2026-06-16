@@ -7,37 +7,43 @@ class DBHandler:
         self.connected = False
         self.conn = None
         self.cursor = None
+        self.cache_mode = True # Use SQLite Cache by default for speed
 
         if not self.config: return
 
         # SAFETY NET: Use .get(key, "default_name") to prevent 'none' errors
+        from logic.sql_utils import sanitize_identifier
+
+        def s(val):
+            return sanitize_identifier(val) if val else val
+
         self.map = {
-            "tbl_student": self.config.get("tbl_student", "student"),
-            "tbl_academic": self.config.get("tbl_academic", "academics"),
-            "tbl_history": self.config.get("tbl_history", "academic_history"),
-            "tbl_branch": self.config.get("tbl_branch", "branch"),
-            "join_student": self.config.get("col_student_join", "student_id"),
-            "join_branch": self.config.get("col_branch_join", "branch_id"),
-            "col_semester": self.config.get("col_semester", "semester"),
-            "id": self.config.get("col_id", "roll_no"),
-            "name": self.config.get("col_name", "name"),
-            "branch_name": self.config.get("col_branch_name", "branch_name"),
-            "year": self.config.get("col_year", "year"),
-            "att": self.config.get("col_att", "attendance"),
-            "marks": self.config.get("col_marks", "internal_marks"),
-            "cgpa": self.config.get("col_cgpa", "cgpa"),
-            "backlogs": self.config.get("col_backlogs", "backlogs"),
-            "tenth": self.config.get("col_tenth", "tenth_percentage"),
-            "inter": self.config.get("col_inter", "intermediate_percentage"),
-            "diploma": self.config.get("col_diploma", "diploma_percentage"),
-            "lab_perf": self.config.get("col_lab_perf", "lab_performance"),
-            "mid_exam": self.config.get("col_mid_exam", "mid_exam_score"),
-            "cons_abs": self.config.get("col_cons_abs", "consecutive_absences"),
-            "leave_freq": self.config.get("col_leave_freq", "leave_frequency"),
-            "assign_marks": self.config.get("col_assign_marks", "assignment_marks"),
-            "parent_phone": self.config.get("col_parent_phone", "parent_phone"),
-            "parent_email": self.config.get("col_p_email"),
-            "email": self.config.get("col_email")
+            "tbl_student": s(self.config.get("tbl_student", "student")),
+            "tbl_academic": s(self.config.get("tbl_academic", "academics")),
+            "tbl_history": s(self.config.get("tbl_history", "academic_history")),
+            "tbl_branch": s(self.config.get("tbl_branch", "branch")),
+            "join_student": s(self.config.get("col_student_join", "student_id")),
+            "join_branch": s(self.config.get("col_branch_join", "branch_id")),
+            "col_semester": s(self.config.get("col_semester", "semester")),
+            "id": s(self.config.get("col_id", "roll_no")),
+            "name": s(self.config.get("col_name", "name")),
+            "branch_name": s(self.config.get("col_branch_name", "branch_name")),
+            "year": s(self.config.get("col_year", "year")),
+            "att": s(self.config.get("col_att", "attendance")),
+            "marks": s(self.config.get("col_marks", "internal_marks")),
+            "cgpa": s(self.config.get("col_cgpa", "cgpa")),
+            "backlogs": s(self.config.get("col_backlogs", "backlogs")),
+            "tenth": s(self.config.get("col_tenth", "tenth_percentage")),
+            "inter": s(self.config.get("col_inter", "intermediate_percentage")),
+            "diploma": s(self.config.get("col_diploma", "diploma_percentage")),
+            "lab_perf": s(self.config.get("col_lab_perf", "lab_performance")),
+            "mid_exam": s(self.config.get("col_mid_exam", "mid_exam_score")),
+            "cons_abs": s(self.config.get("col_cons_abs", "consecutive_absences")),
+            "leave_freq": s(self.config.get("col_leave_freq", "leave_frequency")),
+            "assign_marks": s(self.config.get("col_assign_marks", "assignment_marks")),
+            "parent_phone": s(self.config.get("col_parent_phone", "parent_phone")),
+            "parent_email": s(self.config.get("col_p_email")),
+            "email": s(self.config.get("col_email"))
         }
         self.connect()
 
@@ -77,10 +83,14 @@ class DBHandler:
     def close(self):
         if self.cursor:
             try: self.cursor.close()
-            except: pass
+            except Exception as e:
+                print(f"Exception caught: {e}")
+                pass
         if self.conn:
             try: self.conn.close()
-            except: pass
+            except Exception as e:
+                print(f"Exception caught: {e}")
+                pass
         self.connected = False
 
     def validate_tables(self):
@@ -102,7 +112,19 @@ class DBHandler:
             return False, f"Error validating tables: {e}"
 
     def get_branch_map(self):
-        if not self.conn or not self.connected: return {}
+        if getattr(self, 'cache_mode', True):
+            try:
+                from logic.local_cache import cache
+                with cache.get_connection() as c_conn:
+                    c_cursor = c_conn.cursor()
+                    c_cursor.execute("SELECT dept_id, dept_name FROM departments")
+                    res = c_cursor.fetchall()
+                    if res:
+                        return {str(r['dept_id']): str(r['dept_name']) for r in res}
+            except Exception as e:
+                print(f"Cache Read Error (get_branch_map): {e}")
+
+        if not self.conn: return {}
         try:
             # Assumes the branch table's primary key is 'id' and the student table's foreign key is join_branch
             sql = f"SELECT id, {self.map['branch_name']} FROM {self.map['tbl_branch']}"
@@ -118,9 +140,41 @@ class DBHandler:
     # Keep your existing get_students and get_all_students...
 
     def get_students(self, branch_id, year):
+        year_val = str(year)[0] if "Year" in str(year) else year
+        numeric_year = 0
+        y_str = str(year_val).lower()
+        if '1' in y_str or 'first' in y_str: numeric_year = 1
+        elif '2' in y_str or 'second' in y_str: numeric_year = 2
+        elif '3' in y_str or 'third' in y_str: numeric_year = 3
+        elif '4' in y_str or 'fourth' in y_str: numeric_year = 4
+
+        import datetime
+        cy = datetime.datetime.now().year
+        
+        possible_years = [year_val, numeric_year, str(numeric_year)]
+        if numeric_year > 0:
+            possible_years.extend([
+                cy - numeric_year, cy - numeric_year + 1, 2024 - numeric_year, 2023 - numeric_year, 2022 - numeric_year
+            ])
+        possible_years = list(set(possible_years))
+        
+        if getattr(self, 'cache_mode', True):
+            try:
+                from logic.local_cache import cache
+                with cache.get_connection() as c_conn:
+                    c_cursor = c_conn.cursor()
+                    placeholders = ", ".join(["?"] * len(possible_years))
+                    sql = f"SELECT * FROM students_cache WHERE branch = ? AND (year IN ({placeholders}) OR syear IN ({placeholders}))"
+                    args = [str(branch_id)] + possible_years + possible_years
+                    c_cursor.execute(sql, tuple(args))
+                    res = c_cursor.fetchall()
+                    if res:
+                        return [dict(r) for r in res]
+            except Exception as e:
+                print(f"Cache Read Error (get_students): {e}")
+
         if not self.conn: return []
         try:
-            year_val = str(year)[0] if "Year" in str(year) else year
             sql_select = f"s.{self.map['id']} AS sid, s.{self.map['name']} AS sname, s.{self.map['year']} AS syear, a.{self.map['att']} AS satt, a.{self.map['marks']} AS smarks, a.{self.map['backlogs']} AS sbkl"
             if self.map['tenth']: sql_select += f", a.{self.map['tenth']} AS stenth"
             if self.map['inter']: sql_select += f", a.{self.map['inter']} AS sinter"
@@ -134,13 +188,24 @@ class DBHandler:
             if self.map['parent_email']: sql_select += f", s.{self.map['parent_email']} AS sparent_email"
             if self.map.get('email'): sql_select += f", s.{self.map['email']} AS semail"
 
-            # Robust Year Matching
-            numeric_year = 0
-            y_str = str(year_val).lower()
-            if '1' in y_str or 'first' in y_str: numeric_year = 1
-            elif '2' in y_str or 'second' in y_str: numeric_year = 2
-            elif '3' in y_str or 'third' in y_str: numeric_year = 3
-            elif '4' in y_str or 'fourth' in y_str: numeric_year = 4
+            import datetime
+            cy = datetime.datetime.now().year
+            
+            # Build an array of all possible representations of this year
+            # Includes 1, 2, "1", "2", 2022, 2023, 2024 etc.
+            possible_years = [year_val, numeric_year, str(numeric_year)]
+            if numeric_year > 0:
+                possible_years.extend([
+                    cy - numeric_year, 
+                    cy - numeric_year + 1, 
+                    2024 - numeric_year, 
+                    2023 - numeric_year,
+                    2022 - numeric_year
+                ])
+                
+            # Remove duplicates to keep query clean
+            possible_years = list(set(possible_years))
+            placeholders = ", ".join(["%s"] * len(possible_years))
 
             sql = f"""
                 SELECT {sql_select}
@@ -152,13 +217,11 @@ class DBHandler:
                     )
                 ) a ON s.id = a.{self.map['join_student']}
                 WHERE s.{self.map['join_branch']} = %s 
-                  AND (s.{self.map['year']} = %s OR s.{self.map['year']} = %s OR s.{self.map['year']} = %s)
+                  AND s.{self.map['year']} IN ({placeholders})
             """
             
-            with open('debug_filter.txt', 'a', encoding='utf-8') as f:
-                f.write(f"SQL: {sql}\nArgs: ({branch_id}, {year_val}, {numeric_year}, {str(numeric_year)})\n")
-                
-            self.cursor.execute(sql, (branch_id, year_val, numeric_year, str(numeric_year)))
+            args = [branch_id] + possible_years
+            self.cursor.execute(sql, tuple(args))
             
             results = []
             for r in self.cursor.fetchall():
@@ -189,15 +252,24 @@ class DBHandler:
                 
             return results
         except Exception as e:
-            with open('debug_filter.txt', 'a', encoding='utf-8') as f:
-                f.write(f"Fetch Students Error: {e}\n")
             print(f"Fetch Students Error: {e}")
             return []
 
     def get_all_students(self):
+        if getattr(self, 'cache_mode', True):
+            try:
+                from logic.local_cache import cache
+                with cache.get_connection() as c_conn:
+                    c_cursor = c_conn.cursor()
+                    c_cursor.execute("SELECT * FROM students_cache")
+                    res = c_cursor.fetchall()
+                    if res: return [dict(r) for r in res]
+            except Exception as e:
+                print(f"Cache Read Error (get_all_students): {e}")
+                
         if not self.conn: return []
         try:
-            sql_select = f"s.{self.map['id']} AS sid, s.{self.map['join_branch']} AS bid, s.{self.map['year']} AS syear, a.{self.map['att']} AS att, a.{self.map['marks']} AS marks, a.{self.map['backlogs']} AS bkl"
+            sql_select = f"s.{self.map['id']} AS sid, s.{self.map['name']} AS sname, s.{self.map['join_branch']} AS bid, s.{self.map['year']} AS syear, a.{self.map['att']} AS att, a.{self.map['marks']} AS marks, a.{self.map['backlogs']} AS bkl"
             if self.map['tenth']: sql_select += f", a.{self.map['tenth']} AS stenth"
             if self.map['inter']: sql_select += f", a.{self.map['inter']} AS sinter"
             if self.map['diploma']: sql_select += f", a.{self.map['diploma']} AS sdiploma"
@@ -227,6 +299,8 @@ class DBHandler:
                     "id": r.get('sid'),
                     "display_reg_no": r.get('sid'),
                     "registration_no": r.get('sid'),
+                    "name": r.get('sname', 'Unknown'),
+                    "display_name": r.get('sname', 'Unknown'),
                     "branch": str(r['bid']), 
                     "syear": str(r.get('syear', '')),
                     "year": str(r.get('syear', '')),
@@ -395,7 +469,8 @@ class DBHandler:
             else:
                 cursor.execute("SELECT * FROM monthly_trends ORDER BY snapshot_month ASC")
             return cursor.fetchall()
-        except:
+        except Exception as e:
+            print(f"Exception caught: {e}")
             return []
 
     def initialize_notes_table(self):
@@ -454,7 +529,8 @@ class DBHandler:
             cursor = self.conn.cursor(dictionary=True)
             cursor.execute("SELECT * FROM faculty_notes WHERE student_id=%s ORDER BY created_at DESC", (student_id,))
             return cursor.fetchall()
-        except:
+        except Exception as e:
+            print(f"Exception caught: {e}")
             return []
             
     def get_all_notes_filtered(self, department=None):
@@ -465,5 +541,6 @@ class DBHandler:
             else:
                 cursor.execute("SELECT * FROM faculty_notes ORDER BY created_at DESC")
             return cursor.fetchall()
-        except:
+        except Exception as e:
+            print(f"Exception caught: {e}")
             return []

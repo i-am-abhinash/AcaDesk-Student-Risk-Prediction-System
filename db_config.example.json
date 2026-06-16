@@ -1,0 +1,23 @@
+{
+    "central": {
+        "host": "",
+        "user": "",
+        "password": "",
+        "database": "",
+        "port": 3306
+    },
+    "analytics": {
+        "host": "",
+        "user": "",
+        "password": "",
+        "database": "",
+        "port": 3306
+    },
+    "erp": {
+        "host": "",
+        "port": 3306,
+        "database": "",
+        "user": "",
+        "password": ""
+    }
+}

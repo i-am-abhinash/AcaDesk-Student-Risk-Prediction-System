@@ -10,7 +10,11 @@ echo [3/3] Packaging AcaDesk.exe (This may take 2-3 minutes)...
 pyinstaller --noconsole --onefile ^
 --add-data "ui;ui" ^
 --add-data "logic;logic" ^
+--add-data "icon.ico;." ^
+--add-data "logo.png;." ^
+--add-data "logo1.png;." ^
 --add-data "venv\Lib\site-packages\customtkinter;customtkinter/" ^
+--icon="icon.ico" ^
 --hidden-import "pyodbc" ^
 --hidden-import "psycopg2" ^
 --hidden-import "oracledb" ^

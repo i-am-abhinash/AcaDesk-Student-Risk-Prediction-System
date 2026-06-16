@@ -62,62 +62,34 @@ class InstitutionOverviewPanel(ctk.CTkFrame):
             db = DBHandler(erp_conf)
             predictor = AdvancedRiskPredictor(db)
             
-            all_students = db.get_all_students()
-            
             user_type = self.controller.shared_data.get("user_type")
             assigned_dept = self.controller.shared_data.get("assigned_department")
+            target_branch_id = assigned_dept if user_type == "HOD" else None
             
-            if user_type == "HOD" and assigned_dept:
-                all_students = [s for s in all_students if str(s.get("branch", "")) == str(assigned_dept)]
-                
-            if not all_students:
+            branch_map = db.get_branch_map()
+            
+            # Use the optimized fast batch analytics engine
+            from logic.institutional_analytics import InstitutionalAnalytics
+            
+            analytics_data = InstitutionalAnalytics.compute_dashboard_data(db, predictor, branch_map, target_branch_id)
+            
+            if not analytics_data or analytics_data["total_students"] == 0:
                 self.after(0, self._render_error, "No student records found in the database.", COLORS.get("warning", "#FF9100"))
                 return
-
-            branch_map = db.get_branch_map()
-            fallback_map = {"1": "CSE", "2": "ECE", "3": "MECH", "4": "EEE", "5": "IT", "6": "CIVIL", "7": "AIDS", "8": "AIML"}
-            
-            risk_counts = {"High": 0, "Medium": 0, "Low": 0}
+                
+            # Convert analytics_data back to the format UI expects
             dept_stats = {}
-            for s in all_students:
-                report = predictor.analyze(s)
-                lvl = report.get("level", "Low")
-                risk_counts[lvl] += 1
+            for dept_name, stats in analytics_data["ranked_departments"]:
+                # Ensure keys match UI expectations
+                stats["Total"] = stats.get("total", 0)
+                dept_stats[dept_name] = stats
                 
-                b_id = str(s.get("branch", ""))
-                b_name = branch_map.get(b_id)
-                if not b_name: b_name = fallback_map.get(b_id, b_id)
-                if not b_name or b_name.strip() == "" or b_name == "None": b_name = "Unknown"
-                
-                if b_name not in dept_stats:
-                    dept_stats[b_name] = {"Total": 0, "High": 0, "Medium": 0, "Low": 0, "att_sum": 0, "cgpa_sum": 0, "valid_cgpa": 0}
-                
-                ds = dept_stats[b_name]
-                ds["Total"] += 1
-                ds[lvl] += 1
-                
-                att = float(s.get("avg_attendance") or s.get("attendance_pct") or 0)
-                cgpa = float(s.get("cgpa") or s.get("cumulative_gpa") or 0)
-                
-                ds["att_sum"] += att
-                if cgpa > 0:
-                    ds["cgpa_sum"] += cgpa
-                    ds["valid_cgpa"] += 1
-            
-            for d, s in dept_stats.items():
-                hr_pct = (s["High"] / s["Total"] * 100) if s["Total"] > 0 else 0
-                lr_pct = (s["Low"] / s["Total"] * 100) if s["Total"] > 0 else 0
-                att = s["att_sum"] / s["Total"] if s["Total"] > 0 else 0
-                cgpa_scaled = (s["cgpa_sum"] / s["valid_cgpa"] * 10) if s["valid_cgpa"] > 0 else 0
-                health = (lr_pct * 0.4) + (att * 0.4) + (cgpa_scaled * 0.2) - (hr_pct * 0.5)
-                s["health_score"] = max(0, min(100, health))
-            
-            worst_branch = max(dept_stats.keys(), key=lambda k: dept_stats[k]["High"] / dept_stats[k]["Total"] if dept_stats[k]["Total"] > 0 else 0) if dept_stats else "N/A"
-            best_branch = max(dept_stats.keys(), key=lambda k: dept_stats[k]["health_score"]) if dept_stats else "N/A"
+            best_branch = analytics_data["ranked_departments"][0][0] if analytics_data["ranked_departments"] else "N/A"
+            worst_branch = analytics_data["ranked_departments"][-1][0] if analytics_data["ranked_departments"] else "N/A"
 
             data = {
-                "total_students": len(all_students),
-                "risk_counts": risk_counts,
+                "total_students": analytics_data["total_students"],
+                "risk_counts": analytics_data["overall_risk_counts"],
                 "dept_stats": dept_stats,
                 "worst_branch": worst_branch,
                 "best_branch": best_branch

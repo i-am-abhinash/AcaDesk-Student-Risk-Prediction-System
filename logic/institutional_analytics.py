@@ -18,7 +18,7 @@ class InstitutionalAnalytics:
         # Filter if target_branch_id is specified
         if target_branch_id:
             all_students = [s for s in all_students if str(s.get('branch')) == str(target_branch_id)]
-            branch_map = {name: bid for name, bid in branch_map.items() if str(bid) == str(target_branch_id)}
+            branch_map = {bid: name for bid, name in branch_map.items() if str(bid) == str(target_branch_id)}
         
         # Removed debug log file writing
         
@@ -33,41 +33,11 @@ class InstitutionalAnalytics:
                 branch_groups[bid] = []
             branch_groups[bid].append(s)
             
-        # Separate standard students from first-year students
-        from logic.first_year_predictor import FirstYearPredictor
-        first_year_predictor = FirstYearPredictor()
-        
-        standard_students = []
-        first_year_students = []
-        
-        for s in all_students:
-            syear_str = str(s.get('syear', '')).lower()
-            if '1' in syear_str or 'first' in syear_str:
-                first_year_students.append(s)
-            else:
-                standard_students.append(s)
-                
-        # Fast Batch Risk Computation
-        global_stats_std, branch_stats_raw_std = predictor.batch_analyze(standard_students)
-        global_stats_fy, branch_stats_raw_fy = first_year_predictor.batch_analyze(first_year_students)
-        
-        # Combine branch_stats_raw
-        branch_stats_raw = {}
-        for b_id in set(list(branch_stats_raw_std.keys()) + list(branch_stats_raw_fy.keys())):
-            branch_stats_raw[b_id] = {
-                "High": branch_stats_raw_std.get(b_id, {}).get("High", 0) + branch_stats_raw_fy.get(b_id, {}).get("High", 0),
-                "Medium": branch_stats_raw_std.get(b_id, {}).get("Medium", 0) + branch_stats_raw_fy.get(b_id, {}).get("Medium", 0),
-                "Low": branch_stats_raw_std.get(b_id, {}).get("Low", 0) + branch_stats_raw_fy.get(b_id, {}).get("Low", 0)
-            }
+        # Fast Batch Risk Computation (AdvancedRiskPredictor routes internally)
+        global_stats, branch_stats_raw = predictor.batch_analyze(all_students)
             
-        global_stats = {
-            "High": global_stats_std.get("High", 0) + global_stats_fy.get("High", 0),
-            "Medium": global_stats_std.get("Medium", 0) + global_stats_fy.get("Medium", 0),
-            "Low": global_stats_std.get("Low", 0) + global_stats_fy.get("Low", 0)
-        }
-        
         # We need to iterate over all branches
-        for branch_name, branch_id in branch_map.items():
+        for branch_id, branch_name in branch_map.items():
             branch_id_str = str(branch_id)
             students = branch_groups.get(branch_id_str, [])
             if not students:

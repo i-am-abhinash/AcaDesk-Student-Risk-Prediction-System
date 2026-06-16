@@ -1,5 +1,5 @@
 import mysql.connector
-from logic.encryption import hash_password, encrypt_text, decrypt_text
+from logic.encryption import hash_password, verify_password, encrypt_text, decrypt_text
 from logic.central_db_handler import CentralDBHandler
 from logic.config_manager import load_config
 
@@ -11,6 +11,16 @@ class CentralAuth:
         self.password = cfg.get("password", "")
         self.database = cfg.get("database", "acadesk_central")
         self.port = int(cfg.get("port", 3306))
+
+    def _get_server_conn(self):
+        if not self.password: return None
+        try:
+            return mysql.connector.connect(
+                host=self.host, user=self.user, password=self.password, port=self.port, connect_timeout=5
+            )
+        except Exception as e:
+            print(f"Exception caught: {e}")
+            return None
 
     def _get_conn(self):
         if not self.password:
@@ -33,6 +43,17 @@ class CentralAuth:
             return None
 
     def initialize_tables(self):
+        server_conn = self._get_server_conn()
+        if server_conn:
+            try:
+                sc = server_conn.cursor()
+                sc.execute(f"CREATE DATABASE IF NOT EXISTS {self.database}")
+                server_conn.commit()
+            except Exception as e:
+                print(f"Exception caught: {e}")
+                pass
+            finally: server_conn.close()
+
         conn = self._get_conn()
         if not conn: return False
         try:
@@ -122,6 +143,70 @@ class CentralAuth:
                 sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""")
             
+            cursor.execute("""CREATE TABLE IF NOT EXISTS faculty_notes (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                faculty_id VARCHAR(100),
+                student_id VARCHAR(100),
+                note TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""")
+            
+            cursor.execute("""CREATE TABLE IF NOT EXISTS note_history (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                note_id INT,
+                old_note TEXT,
+                modified_by VARCHAR(100),
+                modified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""")
+            
+            cursor.execute("""CREATE TABLE IF NOT EXISTS student_timelines (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                student_id VARCHAR(100),
+                event_type VARCHAR(100),
+                description TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""")
+            
+            cursor.execute("""CREATE TABLE IF NOT EXISTS recommendations (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                student_id VARCHAR(100),
+                recommendation TEXT,
+                status VARCHAR(50) DEFAULT 'Pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""")
+            
+            cursor.execute("""CREATE TABLE IF NOT EXISTS notification_logs (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                student_id VARCHAR(100),
+                message TEXT,
+                sent_by VARCHAR(100),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""")
+            
+            cursor.execute("""CREATE TABLE IF NOT EXISTS audit_logs (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id VARCHAR(100),
+                action VARCHAR(100),
+                details TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""")
+            
+            cursor.execute("""CREATE TABLE IF NOT EXISTS system_settings (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                setting_key VARCHAR(100) UNIQUE,
+                setting_value TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            )""")
+            
+            cursor.execute("""CREATE TABLE IF NOT EXISTS user_sessions (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                username VARCHAR(100),
+                session_token VARCHAR(255),
+                ip_address VARCHAR(50),
+                login_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            )""")
+            
             conn.commit()
             return True
         except Exception as e:
@@ -163,7 +248,8 @@ class CentralAuth:
             cursor.execute("SELECT COUNT(*) FROM admins")
             count = cursor.fetchone()[0]
             return count > 0
-        except:
+        except Exception as e:
+            print(f"Exception caught: {e}")
             return False
         finally:
             if conn: conn.close()
@@ -216,7 +302,9 @@ class CentralAuth:
             cursor = conn.cursor(dictionary=True)
             cursor.execute("SELECT username, assigned_branch FROM faculty_accounts WHERE college_name=%s", (college_name,))
             return cursor.fetchall()
-        except: return []
+        except Exception as e:
+            print(f"Exception caught: {e}")
+            return []
         finally:
             if conn: conn.close()
 
@@ -261,7 +349,9 @@ class CentralAuth:
             cursor = conn.cursor(dictionary=True)
             cursor.execute("SELECT username, assigned_department, email FROM hod_accounts WHERE college_name=%s", (college_name,))
             return cursor.fetchall()
-        except: return []
+        except Exception as e:
+            print(f"Exception caught: {e}")
+            return []
         finally:
             if conn: conn.close()
 
@@ -274,7 +364,9 @@ class CentralAuth:
             conn.commit()
             CentralDBHandler().log_audit("System", "HOD Removed", f"Revoked HOD {username}")
             return True
-        except: return False
+        except Exception as e:
+            print(f"Exception caught: {e}")
+            return False
         finally:
             if conn: conn.close()
 
@@ -287,7 +379,9 @@ class CentralAuth:
             conn.commit()
             CentralDBHandler().log_audit("System", "Faculty Removed", f"Revoked faculty {username}")
             return True
-        except: return False
+        except Exception as e:
+            print(f"Exception caught: {e}")
+            return False
         finally:
             if conn: conn.close()
 
@@ -296,32 +390,41 @@ class CentralAuth:
         if not conn: return None, "Server Offline"
         try:
             cursor = conn.cursor(dictionary=True)
-            hashed = hash_password(password)
             
-            # Lookup in all 3 tables
+            # Fetch user without checking password_hash
             user = None
             role = None
             
-            cursor.execute("SELECT username, college_name FROM admins WHERE username=%s AND password_hash=%s", (username, hashed))
+            cursor.execute("SELECT username, college_name, password_hash FROM admins WHERE username=%s", (username,))
             admin = cursor.fetchone()
-            if admin:
+            if admin and verify_password(password, admin['password_hash']):
                 user = admin
                 role = "Admin"
+                if not admin['password_hash'].startswith("$2"):
+                    cursor.execute("UPDATE admins SET password_hash=%s WHERE username=%s", (hash_password(password), username))
+                    conn.commit()
             else:
-                cursor.execute("SELECT username, college_name, assigned_department FROM hod_accounts WHERE username=%s AND password_hash=%s", (username, hashed))
+                cursor.execute("SELECT username, college_name, assigned_department, password_hash FROM hod_accounts WHERE username=%s", (username,))
                 hod = cursor.fetchone()
-                if hod:
+                if hod and verify_password(password, hod['password_hash']):
                     user = hod
                     role = "HOD"
+                    if not hod['password_hash'].startswith("$2"):
+                        cursor.execute("UPDATE hod_accounts SET password_hash=%s WHERE username=%s", (hash_password(password), username))
+                        conn.commit()
                 else:
-                    cursor.execute("SELECT username, college_name, assigned_branch FROM faculty_accounts WHERE username=%s AND password_hash=%s", (username, hashed))
+                    cursor.execute("SELECT username, college_name, assigned_branch, password_hash FROM faculty_accounts WHERE username=%s", (username,))
                     fac = cursor.fetchone()
-                    if fac:
+                    if fac and verify_password(password, fac['password_hash']):
                         user = fac
                         role = "Faculty"
+                        if not fac['password_hash'].startswith("$2"):
+                            cursor.execute("UPDATE faculty_accounts SET password_hash=%s WHERE username=%s", (hash_password(password), username))
+                            conn.commit()
             
             if not user: return None, "Invalid Credentials"
             
+            del user['password_hash']
             user['role'] = role
 
             cursor.execute("SELECT * FROM erp_configs WHERE college_name=%s", (user['college_name'],))
@@ -348,9 +451,7 @@ class CentralAuth:
         conn = self._get_conn()
         if not conn: return False, "Database connection failed"
         
-        from logic.encryption import hash_password
-        curr_hashed = hash_password(current_password)
-        new_hashed = hash_password(new_password)
+        from logic.encryption import hash_password, verify_password
         
         table = ""
         if user_type == "Admin": table = "admins"
@@ -359,11 +460,14 @@ class CentralAuth:
         else: return False, "Invalid user type"
         
         try:
-            cursor = conn.cursor()
-            cursor.execute(f"SELECT * FROM {table} WHERE username=%s AND password_hash=%s", (username, curr_hashed))
-            if not cursor.fetchone():
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute(f"SELECT password_hash FROM {table} WHERE username=%s", (username,))
+            row = cursor.fetchone()
+            
+            if not row or not verify_password(current_password, row['password_hash']):
                 return False, "Incorrect current password"
                 
+            new_hashed = hash_password(new_password)
             cursor.execute(f"UPDATE {table} SET password_hash=%s WHERE username=%s", (new_hashed, username))
             conn.commit()
             return True, "Password updated successfully"
@@ -444,6 +548,23 @@ class CentralAuth:
             cursor.execute("INSERT INTO faculty_notes (student_id, faculty_username, department, note_text, note_status) VALUES (%s, %s, %s, %s, %s)",
                            (student_id, faculty_username, department, note_text, note_status))
             conn.commit()
+            
+            # Write-through to SQLite Cache
+            try:
+                from logic.local_cache import cache
+                from datetime import datetime
+                note_data = [{
+                    "student_id": str(student_id),
+                    "faculty_username": str(faculty_username),
+                    "department": str(department),
+                    "note_text": str(note_text),
+                    "note_status": str(note_status),
+                    "created_at": datetime.now().isoformat()
+                }]
+                cache.bulk_insert("faculty_notes", note_data)
+            except Exception as ce:
+                print(f"Cache write-through error: {ce}")
+                
             return True
         except Exception as e:
             print("save_faculty_note error:", e)
@@ -452,13 +573,24 @@ class CentralAuth:
             conn.close()
 
     def get_notes_for_student(self, student_id):
+        try:
+            from logic.local_cache import cache
+            with cache.get_connection() as c_conn:
+                c_cursor = c_conn.cursor()
+                c_cursor.execute("SELECT * FROM faculty_notes WHERE student_id=? ORDER BY created_at DESC", (str(student_id),))
+                res = c_cursor.fetchall()
+                if res: return [dict(r) for r in res]
+        except Exception as ce:
+            print(f"Cache read error: {ce}")
         conn = self._get_conn()
         if not conn: return []
         try:
             cursor = conn.cursor(dictionary=True)
             cursor.execute("SELECT * FROM faculty_notes WHERE student_id=%s ORDER BY created_at DESC", (student_id,))
             return cursor.fetchall()
-        except: return []
+        except Exception as e:
+            print(f"Exception caught: {e}")
+            return []
         finally:
             if conn: conn.close()
             
@@ -522,7 +654,9 @@ class CentralAuth:
             cursor = conn.cursor(dictionary=True)
             cursor.execute("SELECT * FROM faculty_notes ORDER BY created_at DESC")
             return cursor.fetchall()
-        except: return []
+        except Exception as e:
+            print(f"Exception caught: {e}")
+            return []
         finally:
             if conn: conn.close()
             
@@ -533,7 +667,9 @@ class CentralAuth:
             cursor = conn.cursor(dictionary=True)
             cursor.execute("SELECT * FROM faculty_notes WHERE department=%s ORDER BY created_at DESC", (department,))
             return cursor.fetchall()
-        except: return []
+        except Exception as e:
+            print(f"Exception caught: {e}")
+            return []
         finally:
             if conn: conn.close()
 
@@ -545,7 +681,9 @@ class CentralAuth:
             cursor.execute("UPDATE faculty_notes SET note_text=%s WHERE id=%s", (new_text, note_id))
             conn.commit()
             return True
-        except: return False
+        except Exception as e:
+            print(f"Exception caught: {e}")
+            return False
         finally:
             conn.close()
 
@@ -557,6 +695,8 @@ class CentralAuth:
             cursor.execute("DELETE FROM faculty_notes WHERE id=%s", (note_id,))
             conn.commit()
             return True
-        except: return False
+        except Exception as e:
+            print(f"Exception caught: {e}")
+            return False
         finally:
             conn.close()

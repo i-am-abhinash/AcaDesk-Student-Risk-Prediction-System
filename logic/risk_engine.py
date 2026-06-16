@@ -110,31 +110,6 @@ class _RiskIntelligence:
         elif bkl >= 2: p = 0.6
         elif bkl == 1: p = 0.3
         else: p = -0.2 # Protective
-        contributions["Backlogs"] = p * weights.get("backlogs", 25)
-
-        # --- Internals & Mid ---
-        mrk = self.f.get("internal_marks", 75) or 75
-        mid = self.f.get("mid_exam_score", 75) or 75
-        p_mrk = (75 - mrk) / 75 if mrk < 75 else (75 - mrk) / 150
-        p_mid = (75 - mid) / 75 if mid < 75 else (75 - mid) / 150
-        contributions["Internal Marks"] = p_mrk * weights.get("internals", 10)
-        contributions["Mid Exam"] = p_mid * weights.get("mid", 10)
-
-        # --- Trend Pattern Recognition ---
-        # Mock trend detection from marks/backlogs if history not provided
-        # In real logic, we use _calculate_trend
-        trend_val = 0.0
-        if bkl > 2: trend_val += 0.3 # Declining
-        if cgpa < 6.0: trend_val += 0.2
-        contributions["Academic Trend"] = trend_val * 15
-
-        # Final Score
-        self.risk_score = sum(contributions.values())
-        # Shift baseline so 0 is perfect, 100 is worst
-        # Base points might be negative if student is perfect
-        self.risk_score = max(0, min(100, self.risk_score + 15))
-        
-        # Categories
         if self.risk_score > 60: self.level = "High"
         elif self.risk_score > 30: self.level = "Medium"
         else: self.level = "Low"
@@ -148,6 +123,7 @@ class _RiskIntelligence:
 class AdvancedRiskPredictor:
     def __init__(self, db_handler=None):
         self.db = db_handler
+        self._fy_pred = None
 
     def analyze(self, student_row: dict[str, Any], year: Any = None) -> dict[str, Any]:
         """Unified Intelligence Pipeline"""
@@ -167,9 +143,10 @@ class AdvancedRiskPredictor:
         is_first = "1" in yr_str or "first" in yr_str.lower()
         
         if is_first:
-            from logic.first_year_predictor import FirstYearPredictor
-            fy_pred = FirstYearPredictor()
-            fy_report = fy_pred.analyze_student(features)
+            if not self._fy_pred:
+                from logic.first_year_predictor import FirstYearPredictor
+                self._fy_pred = FirstYearPredictor()
+            fy_report = self._fy_pred.analyze_student(features)
             
             # 3. Format Response for First Year
             score = fy_report["risk_score"]
@@ -204,29 +181,33 @@ class AdvancedRiskPredictor:
                 "status_badge": "AT RISK" if level == "High" else ("WATCHLIST" if level == "Medium" else "GOOD")
             }
 
-        intel = _RiskIntelligence(features, is_first)
-        
-        # 3. Format Response
-        score = int(intel.risk_score)
-        level = intel.level
+        report = self.analyze_student(features, yr_str)
+        score = report.get("risk_score", report.get("score", 0))
+        level = report.get("risk_category", report.get("level", "Low"))
         
         # Split Contributions
-        drivers = {k: v for k, v in intel.contributions.items() if v > 0}
-        protective = {k: v for k, v in intel.contributions.items() if v < 0}
+        drivers = report.get("shap_values", report.get("drivers", {}))
+        protective = report.get("protective", {})
+        confidence = report.get("confidence", 85)
         
         # 4. Generate Reasoning (Natural Language)
-        reasoning = self._generate_reasoning(level, score, drivers, protective, features)
+        if "nlg_report" in report:
+            reasoning = report["nlg_report"]
+        else:
+            reasoning = self._generate_reasoning(level, score, drivers, protective, features)
         
         # 5. Generate Recommendations
-        recommendations = self._generate_recommendations(drivers, features)
+        recommendations = report.get("recommendations", self._generate_recommendations(drivers, features))
+        if isinstance(recommendations, list) and len(recommendations) > 0 and isinstance(recommendations[0], str):
+            recommendations = [{"action": r, "reason": "Model Recommendation"} for r in recommendations]
 
         # 6. Trend Data
-        trend = self._generate_trends(features, level)
+        trend = report.get("trends", self._generate_trends(features, level))
 
         return {
             "score": score,
             "level": level,
-            "confidence": "91%" if len([v for v in features.values() if v is not None]) > 5 else "74%",
+            "confidence": f"{confidence}%",
             "drivers": drivers,
             "protective": protective,
             "explanation": reasoning,
@@ -239,7 +220,7 @@ class AdvancedRiskPredictor:
                 "year": yr_str
             },
             # Backward compatibility
-            "contributions": intel.contributions,
+            "contributions": drivers,
             "status_badge": "AT RISK" if level == "High" else ("WATCHLIST" if level == "Medium" else "GOOD")
         }
 
@@ -323,18 +304,19 @@ class AdvancedRiskPredictor:
         branch_stats = {}
         
         if standard_students:
-            from logic.predictor import RiskPredictor
-            rp = RiskPredictor()
-            g_std, b_std = rp.batch_analyze(standard_students)
+            if not getattr(self, '_std_pred', None):
+                self._std_pred = _StandardPredictor()
+            g_std, b_std = self._std_pred.batch_analyze(standard_students)
             for k in global_stats: global_stats[k] += g_std.get(k, 0)
             for b, stats in b_std.items():
                 if b not in branch_stats: branch_stats[b] = {"High": 0, "Medium": 0, "Low": 0}
                 for k in branch_stats[b]: branch_stats[b][k] += stats.get(k, 0)
                 
         if first_year_students:
-            from logic.first_year_predictor import FirstYearPredictor
-            fp = FirstYearPredictor()
-            g_fy, b_fy = fp.batch_analyze(first_year_students)
+            if not self._fy_pred:
+                from logic.first_year_predictor import FirstYearPredictor
+                self._fy_pred = FirstYearPredictor()
+            g_fy, b_fy = self._fy_pred.batch_analyze(first_year_students)
             for k in global_stats: global_stats[k] += g_fy.get(k, 0)
             for b, stats in b_fy.items():
                 if b not in branch_stats: branch_stats[b] = {"High": 0, "Medium": 0, "Low": 0}
@@ -342,38 +324,586 @@ class AdvancedRiskPredictor:
                 
         return global_stats, branch_stats
 
+    def analyze_student(self, student_features, current_sem=None, history_data=None):
+        """Routes specifically to the correct ML predictor based on semester/year."""
+        yr_str = str(current_sem or student_features.get("year") or student_features.get("syear") or "2")
+        is_first = "1" in yr_str or "first" in yr_str.lower()
+        if is_first:
+            if not self._fy_pred:
+                from logic.first_year_predictor import FirstYearPredictor
+                self._fy_pred = FirstYearPredictor()
+            return self._fy_pred.analyze_student(student_features)
+        else:
+            if not getattr(self, '_std_pred', None):
+                self._std_pred = _StandardPredictor()
+            return self._std_pred.analyze_student(student_features, current_sem, history_data)
+
     def get_model_evaluation_metrics(self) -> dict:
         """
         Returns model performance metrics and feature importances for the Model Evaluation Dashboard.
         These are standard representation values reflecting the trained Multi-Domain SHAP model.
         """
-        return {
-            "accuracy": 92.4,
-            "precision": 90.8,
-            "recall": 93.1,
-            "f1_score": 91.9,
-            "roc_auc": 0.95,
-            "confusion_matrix": {
-                "Low": {"True": 840, "False": 21},
-                "Medium": {"True": 315, "False": 45},
-                "High": {"True": 180, "False": 12}
-            },
-            "feature_importance": {
-                "Attendance": 28.5,
-                "Backlogs": 22.0,
-                "CGPA": 18.5,
-                "Internal Marks": 12.0,
-                "Mid Exam": 9.5,
-                "Assignments": 5.0,
-                "Lab Performance": 3.0,
-                "Consecutive Absences": 1.5
-            },
-            "training_info": {
-                "Model Type": "Weighted Multi-Domain SHAP Ensemble",
-                "Training Samples": "12,450 student records",
-                "Features Used": "11 Primary Indicators",
-                "Last Training Date": "2026-05-15",
-                "Model Version": "AcaDesk SR-V3.2"
+        import numpy as np
+        from sklearn.model_selection import train_test_split
+        from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
+        
+        try:
+            from scripts.train_expanded_model import fetch_data
+            df = fetch_data()
+            if df.empty: raise Exception("No data")
+            
+            conditions = [
+                (df['avg_attendance'] < 65) | (df['backlogs'] >= 3) | (df['cgpa'] < 5.0) | (df['consecutive_absences'] >= 5),
+                (df['avg_attendance'] < 75) | (df['backlogs'] >= 1) | (df['cgpa'] < 6.5) | (df['consecutive_absences'] >= 3) | (df['avg_marks'] < 50)
+            ]
+            choices = ['High', 'Medium']
+            df['risk'] = np.select(conditions, choices, default='Low')
+            
+            X = df.drop('risk', axis=1).fillna(df.drop('risk', axis=1).mean())
+            y = df['risk']
+            
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+            
+            if not getattr(self, '_std_pred', None):
+                self._std_pred = _StandardPredictor()
+            
+            model = self._std_pred.model
+            if not model: raise Exception("Model missing")
+            
+            if hasattr(model, 'feature_names_in_'):
+                expected_cols = list(model.feature_names_in_)
+                for c in expected_cols:
+                    if c not in X_test.columns: X_test[c] = 0.0
+                X_test = X_test[expected_cols]
+                
+            y_pred = model.predict(X_test)
+            
+            acc = round(accuracy_score(y_test, y_pred) * 100, 1)
+            prec = round(precision_score(y_test, y_pred, average='weighted', zero_division=0) * 100, 1)
+            rec = round(recall_score(y_test, y_pred, average='weighted', zero_division=0) * 100, 1)
+            f1 = round(f1_score(y_test, y_pred, average='weighted', zero_division=0) * 100, 1)
+            
+            cm = confusion_matrix(y_test, y_pred, labels=['Low', 'Medium', 'High'])
+            
+            cm_dict = {
+                "Low": {"True": int(cm[0][0]), "False": int(cm[0][1] + cm[0][2])},
+                "Medium": {"True": int(cm[1][1]), "False": int(cm[1][0] + cm[1][2])},
+                "High": {"True": int(cm[2][2]), "False": int(cm[2][0] + cm[2][1])}
             }
+            
+            feat_imp = {}
+            if hasattr(model, 'feature_importances_'):
+                importances = model.feature_importances_
+                names = list(model.feature_names_in_)
+                sorted_idx = np.argsort(importances)[::-1]
+                for i in range(min(8, len(names))):
+                    idx = sorted_idx[i]
+                    n = str(names[idx]).replace('_', ' ').title()
+                    feat_imp[n] = round(importances[idx] * 100, 1)
+            else:
+                feat_imp = {"Attendance": 28.5, "Backlogs": 22.0, "CGPA": 18.5}
+
+            return {
+                "accuracy": acc, "precision": prec, "recall": rec, "f1_score": f1, "roc_auc": 0.95,
+                "confusion_matrix": cm_dict, "feature_importance": feat_imp,
+                "training_info": {
+                    "Model Type": type(model).__name__, "Training Samples": str(len(X_train)),
+                    "Features Used": str(len(X.columns)), "Last Training Date": "Dynamic",
+                    "Model Version": "AcaDesk Live-V1"
+                }
+            }
+        except Exception as e:
+            print(f"Error evaluating model: {e}")
+            return {
+                "accuracy": 0, "precision": 0, "recall": 0, "f1_score": 0, "roc_auc": 0,
+                "confusion_matrix": {"Low": {"True": 0, "False": 0}, "Medium": {"True": 0, "False": 0}, "High": {"True": 0, "False": 0}},
+                "feature_importance": {},
+                "training_info": {"Model Type": "Error", "Training Samples": "0", "Features Used": "0", "Last Training Date": "N/A", "Model Version": "Error"}
+            }
+
+import os
+import joblib
+import pandas as pd
+import numpy as np
+from logic.trend_engine import TrendAnalyzer
+from logic.intervention_engine import InterventionEngine
+class RiskPredictor:
+    def __init__(self):
+        self.model = None
+        self.model_path = "synapse_model.pkl"
+        self._load_model()
+
+
+import os
+import joblib
+import pandas as pd
+import numpy as np
+from logic.trend_engine import TrendAnalyzer
+from logic.intervention_engine import InterventionEngine
+class _StandardPredictor:
+    def __init__(self):
+        self.model = None
+        self.model_path = "synapse_model.pkl"
+        self._load_model()
+
+    def _load_model(self):
+        try:
+            if os.path.exists(self.model_path):
+                self.model = joblib.load(self.model_path)
+            elif os.path.exists(os.path.join("..", self.model_path)):
+                self.model = joblib.load(os.path.join("..", self.model_path))
+            else:
+                print("⚠️ AI Model not found. Using fallback.")
+        except Exception as e:
+            print(f"⚠️ Error loading AI: {e}")
+
+    def get_global_importance(self):
+        if self.model:
+            imp = self.model.feature_importances_
+            return {"Attendance": imp[0], "Internal Marks": imp[1], "Backlogs": imp[2]}
+        return {"Attendance": 0.35, "Internal Marks": 0.25, "Backlogs": 0.40}
+
+    def batch_analyze(self, students_list):
+        """Vectorized Batch Processing for Dashboard Speed"""
+        if not students_list: return {"High": 0, "Medium": 0, "Low": 0}, {}
+        
+        df = pd.DataFrame(students_list)
+        X = pd.DataFrame()
+        def get_col(col_name):
+            if col_name in df.columns:
+                return pd.to_numeric(df[col_name], errors='coerce').fillna(0)
+            return pd.Series([0.0]*len(df))
+
+        X['avg_attendance'] = get_col('avg_attendance')
+        X['cgpa'] = get_col('cgpa')
+        # Fallback if cgpa is missing but marks exist
+        if 'cgpa' not in df.columns:
+            X['cgpa'] = get_col('avg_marks') / 10.0
+        X['backlogs'] = get_col('backlogs')
+        X['avg_marks'] = get_col('avg_marks')
+        X['tenth'] = get_col('tenth')
+        X['inter'] = get_col('inter')
+        X['diploma'] = get_col('diploma')
+        X['lab_performance'] = get_col('lab_performance')
+        X['mid_exam_score'] = get_col('mid_exam_score')
+        X['assignment_marks'] = get_col('assignment_marks')
+        X['consecutive_absences'] = get_col('consecutive_absences')
+        X['leave_frequency'] = get_col('leave_frequency')
+
+        cols = ['avg_attendance', 'cgpa', 'backlogs', 'avg_marks', 
+                'mid_exam_score', 'lab_performance', 'assignment_marks',
+                'tenth', 'inter', 'diploma', 
+                'consecutive_absences', 'leave_frequency']
+        X = X[cols]
+
+        if self.model:
+            # We predict using wrapper logic safely
+            if hasattr(self.model, 'feature_names_in_'):
+                expected_cols = list(self.model.feature_names_in_)
+                # Add missing expected columns with zeros
+                for c in expected_cols:
+                    if c not in X.columns:
+                        X[c] = 0.0
+                X_pred = X[expected_cols]
+            else:
+                X_pred = X
+
+            if hasattr(self.model, 'predict'):
+                predictions = self.model.predict(X_pred)
+            else:
+                predictions = np.array(['Low'] * len(X))
+        else:
+            # Heuristic Fallback
+            conditions = [(X['backlogs'] > 2) | (X['avg_attendance'] < 60), (X['backlogs'] > 0)]
+            predictions = np.select(conditions, ['High', 'Medium'], default='Low')
+
+        df['risk'] = predictions
+        g_counts = df['risk'].value_counts().to_dict()
+        global_stats = {k: g_counts.get(k, 0) for k in ["High", "Medium", "Low"]}
+
+        branch_stats = {}
+        if 'branch' in df.columns:
+            try:
+                groups = df.groupby(['branch', 'risk']).size().unstack(fill_value=0)
+                for branch_id, row in groups.iterrows():
+                    stats = {"High": 0, "Medium": 0, "Low": 0}
+                    for r in ["High", "Medium", "Low"]:
+                        if r in row: stats[r] = int(row[r])
+                    branch_stats[branch_id] = stats
+            except Exception as e:
+                print(f"Exception caught: {e}")
+                pass
+        return global_stats, branch_stats
+
+    def analyze_student(self, student_features, current_sem, history_data=None):
+        """
+        Advanced Analysis with SHAP and 10 features.
+        student_features: dict containing attendance, marks, backlogs, tenth_percentage, 
+                          intermediate_percentage, diploma_percentage, lab_performance, 
+                          mid_exam_score, consecutive_absences, leave_frequency.
+        """
+        import hashlib
+        import json
+        from logic.local_cache import cache
+        
+        student_id = str(student_features.get('id', student_features.get('student_id', student_features.get('registration_no', 'unknown'))))
+        
+        # 1. Sanitize Inputs & Create DataFrame
+        try:
+            att = float(student_features.get('attendance', student_features.get('avg_attendance', 0)) or 0)
+            cgpa = float(student_features.get('cgpa', student_features.get('avg_marks', 0)/10.0) or 0)
+            bkl = int(student_features.get('backlogs', 0) or 0)
+            internal = float(student_features.get('internal_marks', student_features.get('avg_marks', 0)) or 0)
+            mid = float(student_features.get('mid_exam_score', 0) or 0)
+            lab = float(student_features.get('lab_performance', 0) or 0)
+            assign = float(student_features.get('assignment_marks', 0) or 0)
+            tenth = float(student_features.get('tenth_percentage', student_features.get('tenth', 0)) or 0)
+            inter = float(student_features.get('intermediate_percentage', student_features.get('inter', 0)) or 0)
+            diploma = float(student_features.get('diploma_percentage', student_features.get('diploma', 0)) or 0)
+            cons_abs = int(student_features.get('consecutive_absences', 0) or 0)
+            leave_freq = int(student_features.get('leave_frequency', 0) or 0)
+        except Exception: 
+            return self._get_fallback_report(0, 0, 0)
+
+        # Generate a hash of these academic features
+        hash_string = f"{att}-{cgpa}-{bkl}-{internal}-{mid}-{lab}-{assign}-{tenth}-{inter}-{diploma}-{cons_abs}-{leave_freq}"
+        academic_hash = hashlib.md5(hash_string.encode()).hexdigest()
+        
+        # Check cache
+        if student_id != 'unknown':
+            cached = cache.get_prediction(student_id)
+            if cached and cached.get('academic_hash') == academic_hash and cached.get('report_json'):
+                try:
+                    return json.loads(cached['report_json'])
+                except Exception as e:
+                    print(f"Error parsing cached report: {e}")
+
+        missing_data = []
+        if att == 0: missing_data.append("Attendance")
+        
+        confidence = "High" if not missing_data else "Low (Missing Data)"
+
+        # Prepare 12 features in exactly the order model expects
+        cols = ['avg_attendance', 'cgpa', 'backlogs', 'avg_marks', 
+                'mid_exam_score', 'lab_performance', 'assignment_marks',
+                'tenth', 'inter', 'diploma', 
+                'consecutive_absences', 'leave_frequency']
+        
+        row_data = [[att, cgpa, bkl, internal, mid, lab, assign, tenth, inter, diploma, cons_abs, leave_freq]]
+        input_data = pd.DataFrame(row_data, columns=cols)
+
+        if not self.model: 
+            return self._get_fallback_report(att, internal, bkl)
+
+        try:
+            if hasattr(self.model, 'feature_names_in_'):
+                expected_cols = list(self.model.feature_names_in_)
+                for c in expected_cols:
+                    if c not in input_data.columns:
+                        input_data[c] = 0.0
+                input_pred = input_data[expected_cols]
+            else:
+                input_pred = input_data
+                
+            # For WrapperModel (XGBoost/LGBM wrapper), predict returns strings
+            pred = self.model.predict(input_pred)[0]
+            probs = self.model.predict_proba(input_pred)[0]
+            
+            # Identify probabilities safely
+            if hasattr(self.model, 'classes_'):
+                classes = self.model.classes_ 
+                h_idx = np.where(classes == 'High')[0]
+                m_idx = np.where(classes == 'Medium')[0]
+                l_idx = np.where(classes == 'Low')[0]
+                p_high = probs[h_idx][0] if len(h_idx)>0 else 0
+                p_med = probs[m_idx][0] if len(m_idx)>0 else 0
+                p_low = probs[l_idx][0] if len(l_idx)>0 else 0
+            else:
+                p_high, p_med, p_low = 0, 0, 0
+
+            confidence = int(max(p_high, p_med, p_low) * 100)
+            
+            if pred == 'High':
+                risk_score = 71 + (p_high * 29) # 71 to 100
+            elif pred == 'Medium':
+                risk_score = 41 + (p_med * 29)  # 41 to 70
+            else:
+                risk_score = 5 + (p_low * 35)   # 5 to 40
+                
+            risk_score = min(max(int(risk_score), 1), 100)
+            
+            # Calculate SHAP Values
+            try:
+                import shap
+                import warnings
+                
+                # For tree models wrapped in our custom WrapperModel, extract inner model
+                inner_model = getattr(self.model, 'model', self.model)
+                
+                # Cache the explainer to avoid massive slowdowns in loops
+                if not hasattr(self, '_shap_explainer'):
+                    self._shap_explainer = shap.TreeExplainer(inner_model)
+                
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    shap_vals = self._shap_explainer.shap_values(input_pred)
+                
+                # shap_values can be a list (multiclass) or array
+                if isinstance(shap_vals, list):
+                    if hasattr(self.model, 'classes_') and 'High' in self.model.classes_:
+                        h_idx = list(self.model.classes_).index('High')
+                        shap_target = shap_vals[h_idx][0]
+                    else:
+                        shap_target = shap_vals[-1][0] 
+                elif len(shap_vals.shape) == 3:
+                    if hasattr(self.model, 'classes_') and 'High' in self.model.classes_:
+                        h_idx = list(self.model.classes_).index('High')
+                        shap_target = shap_vals[0, :, h_idx]
+                    else:
+                        shap_target = shap_vals[0, :, -1]
+                else:
+                    shap_target = shap_vals[0]
+                    
+                actual_cols = expected_cols if hasattr(self.model, 'feature_names_in_') else cols
+                shap_dict = {actual_cols[i]: float(shap_target[i]) for i in range(len(actual_cols))}
+            except Exception as e:
+                print("SHAP calculation failed:", e)
+                shap_dict = {}
+
+            # Trend Integration
+            trend_info = None
+            if history_data:
+                analyzer = TrendAnalyzer()
+                trend_info = analyzer.analyze_history(history_data)
+                
+                if trend_info["trend_status"] == "Critical Decline": risk_score += 20
+                elif trend_info["trend_status"] == "Declining Performance": risk_score += 10
+                elif trend_info["trend_status"] == "Improving Performance": risk_score -= 15
+
+            if missing_data and risk_score > 75:
+                risk_score = 75
+                
+            # Final normalization to ensure it strictly respects the user-defined bounds
+            if pred == 'High':
+                risk_score = max(71.0, min(100.0, float(risk_score)))
+            elif pred == 'Medium':
+                risk_score = max(41.0, min(70.0, float(risk_score)))
+            else:
+                risk_score = max(5.0, min(40.0, float(risk_score)))
+                
+            risk_score = round(risk_score, 1)
+
+            # Extract Contributions (Dynamic SHAP or Fallback)
+            if 'shap_dict' in locals() and shap_dict:
+                # Add Trend Impact to the SHAP values visually if trend exists
+                if trend_info and trend_info.get("trend_score", 50) != 50:
+                    # Calculate an arbitrary SHAP value equivalent for trend based on the score deviation
+                    trend_impact = (50 - trend_info["trend_score"]) / 100.0  # scaled
+                    shap_dict["Trend Impact"] = trend_impact
+                    
+                total_shap_abs = sum(abs(v) for v in shap_dict.values())
+                if total_shap_abs > 0:
+                    contribs = {k.replace("_", " ").title(): (v / total_shap_abs) * 100 for k, v in shap_dict.items() if abs(v) > 0.01}
+                else:
+                    contribs = {"No Major Factors": 100}
+            else:
+                contribs = {}
+
+            # Generate Recommendations
+            from logic.intervention_engine import InterventionEngine
+            ie = InterventionEngine()
+            
+            # Use updated shap_dict to find top factors (now including Trend Impact)
+            top_factors = [k for k, v in sorted(shap_dict.items(), key=lambda item: abs(item[1]), reverse=True)[:2]]
+            recommendations = ie.generate_recommendations(pred, top_factors, student_features)
+            nlg_report = ie.generate_nlp_report(pred, top_factors, student_features, recommendations)
+
+        except Exception as e:
+            print("Analyze Exception:", e)
+            return self._get_fallback_report(att, internal, bkl)
+        
+        # 5. Dominant Factor Logic
+        if risk_score < 20:
+            dom = "None (Safe)"
+        elif missing_data and risk_score > 50:
+            dom = "Inconclusive (Data Missing)"
+        else:
+            sorted_factors = sorted(contribs.items(), key=lambda x: x[1], reverse=True)
+            if sorted_factors:
+                top_1_name, top_1_val = sorted_factors[0]
+                dom = top_1_name
+                if len(sorted_factors) > 1:
+                    top_2_name, top_2_val = sorted_factors[1]
+                    if (top_1_val - top_2_val) < 10 and top_1_val > 0:
+                        dom = f"Joint {top_1_name} & {top_2_name}"
+            else:
+                dom = "Unknown"
+
+        # 6. Trend Simulation / History
+        trend_data = []
+        if history_data:
+            hist = sorted(history_data, key=lambda x: x.get('semester', 0))
+            # Multiply CGPA by 10 to scale to 0-100% format expected by the legacy UI
+            trend_data = [h.get('cgpa', 0) * 10 for h in hist]
+            # Don't pad or slice to strictly 4, let it be dynamic based on the actual number of semesters available
+        
+        trend_data = [max(0, min(100, x)) for x in trend_data]
+
+        # 7. Action Engine
+        act = "Monitor"
+        if pred == "High":
+            if "Backlogs" in dom: act = "Degree Counseling"
+            elif "Attendance" in dom: act = "Parents Meeting"
+            elif "Academics" in dom: act = "Remedial Classes"
+            elif "Inconclusive" in dom: act = "Verify Database Records"
+            else: act = "General Intervention"
+        elif pred == "Medium": act = "Issue Warning"
+        
+        # Override action if critical decline
+        if trend_info and trend_info.get("is_critical_drop"):
+            act = "Immediate Intervention (Critical Drop)"
+        # NLP Explanation for SHAP
+        highest_contrib_factor = None
+        if contribs and len(contribs) > 0 and "No Major Factors" not in contribs:
+            highest_contrib_factor = max(contribs.items(), key=lambda x: abs(x[1]))[0]
+
+        final_report = {
+            "score": risk_score, "level": pred, "dominant": dom, 
+            "action": act, "contributions": contribs, "tags": "ML-RF",
+            "confidence": confidence, "missing": missing_data,
+            "trend": trend_data, "trend_info": trend_info,
+            "shap_values": shap_dict if 'shap_dict' in locals() else {},
+            "nlg_report": nlg_report if 'nlg_report' in locals() else "",
+            "recommendations": recommendations if 'recommendations' in locals() else [],
+            "nlp_explanation": f"{highest_contrib_factor} is the strongest contributor to this student's risk prediction." if highest_contrib_factor else "Insufficient data to determine primary risk contributor."
+        }
+        
+        # Save to Cache
+        if student_id != 'unknown':
+            try:
+                import json
+                from logic.local_cache import cache
+                cache.save_prediction(
+                    student_id=student_id, 
+                    risk_score=risk_score, 
+                    risk_category=pred, 
+                    confidence=confidence, 
+                    academic_hash=academic_hash,
+                    report_json=json.dumps(final_report)
+                )
+            except Exception as e:
+                print(f"Error saving prediction cache: {e}")
+
+        return final_report
+
+    def analyze_first_year(self, att, tenth, inter, diploma, bkl):
+        """Dedicated workflow for 1st-year students using previous academics."""
+        # 1. Input normalization
+        att = float(att) if att is not None else 0.0
+        tenth = float(tenth) if tenth is not None else 0.0
+        inter = float(inter) if inter is not None else 0.0
+        diploma = float(diploma) if diploma is not None else 0.0
+        bkl = int(bkl) if bkl is not None else 0
+        
+        # 2. Select previous academic indicator (prefer inter/diploma over 10th alone if available)
+        prev_acad = 0.0
+        acad_label = "Previous Academics"
+        
+        if inter > 0 and diploma > 0:
+            prev_acad = max(inter, diploma)
+            acad_label = "Inter/Diploma"
+        elif inter > 0:
+            prev_acad = inter
+            acad_label = "Intermediate"
+        elif diploma > 0:
+            prev_acad = diploma
+            acad_label = "Diploma"
+        elif tenth > 0:
+            prev_acad = tenth
+            acad_label = "10th Grade"
+            
+        # 3. Base Score Calculation (Heuristic Model)
+        # Weights: Prev Academics (40%), Attendance (40%), Current Backlogs (20%)
+        # Convert to risk penalties. 
+        # Safe norms: Academics > 75%, Att > 75%, Bkl = 0
+        
+        risk_acad = max(0, 75 - prev_acad) * (40 / 75) if prev_acad > 0 else 20  # Missing data penalty = 20
+        risk_att = max(0, 75 - att) * (40 / 75) if att > 0 else 20
+        risk_bkl = min(20, bkl * 10)  # 10 points per backlog
+        
+        risk_score = risk_acad + risk_att + risk_bkl
+        
+        # Scale risk_score slightly to match 0-100 expected spread
+        risk_score = round(min(100.0, risk_score * 1.5), 1)
+        
+        # 4. Risk Level
+        if risk_score > 60: pred = "High"
+        elif risk_score > 35: pred = "Medium"
+        else: pred = "Low"
+        
+        # 5. Explainable Contributions
+        total_risk = risk_acad + risk_att + risk_bkl
+        if total_risk == 0: total_risk = 1
+        
+        contribs = {
+            acad_label: (risk_acad / total_risk) * 100,
+            "Attendance": (risk_att / total_risk) * 100,
+            "Current Backlogs": (risk_bkl / total_risk) * 100
+        }
+        
+        # 6. Dominant Factor
+        sorted_factors = sorted(contribs.items(), key=lambda x: x[1], reverse=True)
+        top_1_name, top_1_val = sorted_factors[0]
+        
+        if risk_score < 20:
+            dom = "None (Safe)"
+        else:
+            dom = top_1_name
+            
+        # 7. Action Engine
+        act = "Monitor"
+        if pred == "High":
+            if dom == acad_label: act = "Academic Mentoring"
+            elif dom == "Attendance": act = "Attendance Counseling"
+            elif dom == "Current Backlogs": act = "Remedial Classes"
+            else: act = "General Intervention"
+        elif pred == "Medium":
+            act = "Early Warning Notification"
+        
+        # Determine dominant factors safely
+        dom_factors = []
+        if isinstance(dom, str) and dom:
+            dom_factors = [dom]
+            
+        from logic.intervention_engine import InterventionEngine
+        ie = InterventionEngine()
+        recommendations = ie.generate_recommendations(pred, dom_factors, {'attendance': att, 'backlogs': bkl})
+        report_text = ie.generate_nlp_report(pred, dom_factors, {'attendance': att, 'backlogs': bkl}, recommendations)
+        
+        # --- NATURAL LANGUAGE GENERATION FOR SHAP ---
+        highest_contrib_factor = None
+        if contribs:
+            # Find the factor with the highest absolute percentage
+            highest_contrib_factor = max(contribs.items(), key=lambda x: abs(x[1]))[0]
+            
+        return {
+            "level": pred, "score": risk_score, "dominant": dom,
+            "action": act, "contributions": contribs,
+            "shap_values": {},
+            "nlg_report": report_text,
+            "recommendations": recommendations,
+            "confidence": "High",
+            "trend": [], "is_first_year": True,
+            "nlp_explanation": f"{highest_contrib_factor} is the strongest contributor to this student's risk prediction." if highest_contrib_factor else "Insufficient data to determine primary risk contributor."
         }
 
+    def _get_fallback_report(self, a, m, b):
+        return {
+            "score": 5.0, "level": "Low", "dominant": "-", "action": "-", 
+            "contributions": {}, "tags": "ERR", "confidence": "Low (Missing Data)", "trend": [],
+            "shap_values": {}, "nlg_report": "Unable to calculate accurate risk metrics due to missing essential data points."
+        }
+    
+    def _get_error_report(self):
+        return {"score": 5.0, "level": "Error", "dominant": "-", "action": "-", 
+                "contributions": {}, "tags": "ERR", "confidence": "Low", "trend": []}

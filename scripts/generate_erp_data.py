@@ -2,11 +2,15 @@ import mysql.connector
 import random
 import string
 
-# Database connection parameters (default to existing config)
-DB_HOST = "127.0.0.1"
-DB_USER = "root"
-DB_PASSWORD = "Abhinash@19"
-DB_NAME = "engineering_college"
+import os
+
+DB_HOST = os.environ.get("ERP_DB_HOST", "127.0.0.1")
+DB_USER = os.environ.get("ERP_DB_USER")
+DB_PASSWORD = os.environ.get("ERP_DB_PASSWORD")
+DB_NAME = os.environ.get("ERP_DB_NAME", "engineering_college")
+
+if not DB_USER or not DB_PASSWORD:
+    raise ValueError("Missing ERP database credentials. Please set ERP_DB_USER and ERP_DB_PASSWORD environment variables.")
 
 # Schema definitions
 DEPARTMENTS = [

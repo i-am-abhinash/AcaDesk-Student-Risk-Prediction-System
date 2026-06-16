@@ -256,6 +256,16 @@ class ERPWizard(ctk.CTkFrame):
             "col_email": self.field_vars["Student Data"]["col_email"].get()
         }
         
+        from logic.sql_utils import sanitize_identifier
+        for k, v in mapping.items():
+            if v:
+                try:
+                    sanitize_identifier(v)
+                except ValueError as e:
+                    self.btn_action.configure(state="normal", text="VALIDATE & SAVE CONFIG")
+                    ModernMessagebox("Validation Failed", f"Invalid SQL identifier in mapping for {k}: {str(e)}", "error")
+                    return
+        
         def run_test():
             try:
                 sql = f"SELECT s.{s_id}, s.{s_name}, a.{att} FROM {s_tbl} s JOIN {a_tbl} a ON s.{s_id} = a.{s_join} LIMIT 3"

@@ -35,7 +35,8 @@ def load_config():
             try:
                 with open(alt_config, "r") as f:
                     config = json.load(f)
-            except:
+            except Exception as e:
+                print(f"Exception caught: {e}")
                 pass
 
     # 2. Fallback to .env for central/analytics if missing

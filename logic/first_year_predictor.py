@@ -79,7 +79,9 @@ class FirstYearPredictor:
                     for r in ["High", "Medium", "Low"]:
                         if r in row: stats[r] = int(row[r])
                     branch_stats[branch_id] = stats
-            except: pass
+            except Exception as e:
+                print(f"Exception caught: {e}")
+                pass
         return global_stats, branch_stats
 
     def analyze_student(self, student_features):

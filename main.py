@@ -4,6 +4,15 @@ import os
 import sys
 
 # Ensure we can find the ui folder
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_path, relative_path)
+
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 
@@ -22,7 +31,8 @@ COLORS = {
     "success": "#00C853",
     "warning": "#FF9100",
     "accent": "#00E5FF",
-    "text_gray": "#AAAAAA"
+    "text_gray": "#AAAAAA",
+    "card": "#151A22"
 }
 
 # ====================================================
@@ -78,8 +88,7 @@ class RiskAnalysisApp(ctk.CTk):
         tk.Tk.report_callback_exception(self, exc, val, tb)
 
     def on_closing(self):
-        import os
-        os._exit(0)
+        self.destroy()
 
     def __init__(self):
         super().__init__()
@@ -93,7 +102,7 @@ class RiskAnalysisApp(ctk.CTk):
             myappid = 'acadesk.studentriskanalysissystem.1.0'
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
             
-            icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.ico")
+            icon_path = resource_path("icon.ico")
             self.iconbitmap(icon_path)
         except Exception as e:
             print("Failed to set app icon:", e)
@@ -116,7 +125,6 @@ class RiskAnalysisApp(ctk.CTk):
             from logic.analytics_db_handler import AnalyticsDBHandler
             from logic.central_auth import CentralAuth
             
-            CentralDBHandler().initialize_tables()
             AnalyticsDBHandler().initialize_tables()
             CentralAuth().initialize_tables()
         except Exception as e:
@@ -211,7 +219,7 @@ class WelcomeScreen(ctk.CTkFrame):
         try:
             from PIL import Image
             import os
-            logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo1.png")
+            logo_path = resource_path("logo1.png")
             img = Image.open(logo_path)
             ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(280, 280))
             self.logo_lbl = ctk.CTkLabel(left_frame, text="", image=ctk_img)

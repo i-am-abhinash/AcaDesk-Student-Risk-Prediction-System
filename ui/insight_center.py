@@ -481,7 +481,9 @@ class InsightCenter(ctk.CTkFrame):
                     if val is not None:
                         try:
                             self.slider_vars[logical].set(float(val))
-                        except: pass
+                        except Exception as e:
+                            print(f"Exception caught: {e}")
+                            pass
             
             base_report = self.predictor.analyze(target, year="2nd Year")
             score = base_report.get("score", 0.0)
@@ -697,7 +699,9 @@ class RiskIntelligenceDashboard(ctk.CTkFrame):
         def parse_dt(d):
             if isinstance(d, datetime.datetime): return d
             try: return datetime.datetime.strptime(str(d), "%Y-%m-%d %H:%M:%S")
-            except: return datetime.datetime.min
+            except Exception as e:
+                print(f"Exception caught: {e}")
+                return datetime.datetime.min
             
         timeline_events.sort(key=lambda x: parse_dt(x['date']), reverse=True)
         

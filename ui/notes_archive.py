@@ -188,8 +188,7 @@ class NotesArchivePanel(ctk.CTkFrame):
                         CentralAuth().delete_faculty_note(nid)
                         ModernMessagebox("Deleted", "Note successfully deleted.", "success")
                         # Refresh
-                        if hasattr(self.controller, 'frames') and 'NotesArchivePage' in self.controller.frames:
-                            self.controller.frames['NotesArchivePage'].refresh_data()
+                        self.refresh()
                     ModernAskYesNo("Confirm Delete", "Are you sure you want to delete this note?", on_confirm)
                         
                 del_btn = ctk.CTkButton(act_f, text="DELETE", width=70, height=24, fg_color="transparent", border_width=1, border_color="#FF1744", text_color="#FF1744", font=("Inter", 11, "bold"), hover_color="#FF1744", corner_radius=6, command=delete_note)

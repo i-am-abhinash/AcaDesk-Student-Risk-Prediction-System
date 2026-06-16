@@ -73,14 +73,27 @@ If you do not have an existing ERP database, you can generate a massive dummy da
 python populate_erp.py
 ```
 
-**4. Train the ML Models (Optional):**
+**4. Security Key Setup:**
+AcaDesk uses Fernet symmetric encryption for sensitive data (like database credentials). You must create a master encryption key before running the app for the first time.
+To generate and store the key in `~/.acadesk/secret.key`, you can run:
+```bash
+python -c "import os; from cryptography.fernet import Fernet; os.makedirs(os.path.expanduser('~/.acadesk'), exist_ok=True); open(os.path.expanduser('~/.acadesk/secret.key'), 'wb').write(Fernet.generate_key())"
+```
+
+**5. Architecture Overview (Central vs Local DBs):**
+AcaDesk uses a hybrid architecture to ensure security and performance:
+- **ERP Database (MySQL/MariaDB):** Treated as **Read-Only**. AcaDesk will never write to your institution's ERP.
+- **Central Auth DB (`acadesk_central.db`):** An SQLite database used for centralized user authentication, faculty notes, and auditing.
+- **Local Cache DB (`local_cache.db`):** An SQLite database used for fast, offline access to analysis results and encrypted ERP connection configurations.
+
+**6. Train the ML Models (Optional):**
 To regenerate or retrain the Random Forest prediction models based on the current database:
 ```bash
 python scripts/train_first_year_model.py
 python scripts/train_expanded_model.py
 ```
 
-**5. Run the application:**
+**7. Run the application:**
 ```bash
 python main.py
 ```
