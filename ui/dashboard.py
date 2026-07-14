@@ -135,7 +135,7 @@ class Sidebar(ctk.CTkFrame):
                 base_path = sys._MEIPASS
             except Exception:
                 base_path = root_dir
-            logo_path = os.path.join(base_path, "logo.png")
+            logo_path = os.path.join(base_path, "AcaDesk (2).png")
             img = Image.open(logo_path)
             # Resize image to fit nicely next to text
             ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(65, 65))
@@ -639,26 +639,26 @@ class AnalyticsPanel(ctk.CTkFrame):
             
             def load_charts():
                 try:
-                    # Create a local db connection for background thread to avoid race conditions
-                    from logic.db_handler import DBHandler
-                    local_db = DBHandler(self.controller.shared_data.get("erp_config"))
-                    all_students = local_db.get_all_students()
-                    local_db.close()
+                    from logic.session_cache import get_dashboard_summary
+                    summary_data = get_dashboard_summary()
                     
-                    if not all_students:
-                        self.after(0, loading_lbl.destroy)
-                        return
+                    global_stats = {"High": 0, "Medium": 0, "Low": 0}
+                    branch_stats = {}
+                    
+                    if summary_data:
+                        for row in summary_data:
+                            lvl = row["risk_level"]
+                            if lvl not in ["High", "Medium", "Low"]: continue
+                            bname = row["branch_name"]
+                            if bname not in branch_stats:
+                                branch_stats[bname] = {"High": 0, "Medium": 0, "Low": 0}
+                            global_stats[lvl] += row["count"]
+                            branch_stats[bname][lvl] += row["count"]
                         
-                    global_stats, branch_stats_raw = self.ai.batch_analyze(all_students)
-                    branch_stats = {self.translator.get_name(bid): s for bid, s in branch_stats_raw.items()}
                     self.after(0, lambda: self._draw_admin_charts(global_stats, branch_stats, loading_lbl))
                 except Exception as e:
                     print(f"Chart render fail: {e}")
                     self.after(0, loading_lbl.destroy)
-                finally:
-                    if 'local_db' in locals():
-                        try: local_db.close()
-                        except Exception: pass
                     
             import threading
             threading.Thread(target=load_charts, daemon=True).start()
@@ -828,9 +828,44 @@ class AnalyticsPanel(ctk.CTkFrame):
         
         def load_dept_analytics():
             try:
-                from logic.institutional_analytics import InstitutionalAnalytics
-                standard_map = {str(bid): name for bid, name in self.translator.map.items()}
-                data = InstitutionalAnalytics.compute_dashboard_data(self.db, self.ai, standard_map, target_branch_id=self.current_branch)
+                from logic.session_cache import get_dashboard_summary
+                summary_data = get_dashboard_summary()
+                
+                target_bid = str(self.current_branch)
+                stats = {
+                    "avg_attendance": 0, "avg_cgpa": 0, "avg_backlogs": 0,
+                    "health_score": 0, "High": 0, "Medium": 0, "Low": 0, "Pending": 0,
+                    "top_drivers": ["Attendance & Academics"]
+                }
+                
+                total = 0
+                att_sum = 0
+                cgpa_sum = 0
+                bkl_sum = 0
+                
+                for row in summary_data:
+                    if str(row["branch_id"]) != target_bid: continue
+                    lvl = row["risk_level"]
+                    cnt = row["count"]
+                    
+                    if lvl in stats: stats[lvl] += cnt
+                    total += cnt
+                    att_sum += (row["avg_att"] or 0) * cnt
+                    cgpa_sum += (row["avg_cgpa"] or 0) * cnt
+                    bkl_sum += (row["avg_bkl"] or 0) * cnt
+                    
+                if total > 0:
+                    stats["avg_attendance"] = att_sum / total
+                    stats["avg_cgpa"] = cgpa_sum / total
+                    stats["avg_backlogs"] = bkl_sum / total
+                    
+                    h = stats["High"]
+                    m = stats["Medium"]
+                    
+                    health = 100 - ((h * 1.0) + (m * 0.5)) / total * 100
+                    stats["health_score"] = max(0, min(100, health))
+                    
+                data = {"ranked_departments": [ (target_bid, stats) ]}
                 self.after(0, lambda: self._render_dept_analytics(kpi_frame, data))
             except Exception as e:
                 self.after(0, lambda e=e: ctk.CTkLabel(kpi_frame, text=f"Error loading analytics: {e}").pack())
@@ -922,6 +957,7 @@ class AnalyticsPanel(ctk.CTkFrame):
         high = stats.get("High", 0)
         med = stats.get("Medium", 0)
         low = stats.get("Low", 0)
+        pending = stats.get("Pending", 0)
         
         def make_risk_badge(parent, count, label, color):
             f = ctk.CTkFrame(parent, fg_color="transparent")
@@ -932,7 +968,8 @@ class AnalyticsPanel(ctk.CTkFrame):
         if high > 0: make_risk_badge(risk_frame, high, "HIGH", "#FF3D00")
         if med > 0: make_risk_badge(risk_frame, med, "MED", "#FF9100")
         if low > 0: make_risk_badge(risk_frame, low, "LOW", "#00E676")
-        if high == 0 and med == 0 and low == 0: make_risk_badge(risk_frame, 0, "STUDENTS", "#aaa")
+        if pending > 0: make_risk_badge(risk_frame, pending, "PENDING", "#00E5FF")
+        if high == 0 and med == 0 and low == 0 and pending == 0: make_risk_badge(risk_frame, 0, "STUDENTS", "#aaa")
         
         # Right side: Alert Tags
         alerts = ctk.CTkFrame(bottom_metrics, fg_color="transparent")
@@ -991,8 +1028,7 @@ class AnalyticsPanel(ctk.CTkFrame):
         self.btn_all = self._create_pill_btn(filter_frame, "ALL", "All", "#888888")
         self.btn_high = self._create_pill_btn(filter_frame, "HIGH RISK", "High", "#FF5555")
         self.btn_med = self._create_pill_btn(filter_frame, "MEDIUM RISK", "Medium", "#FF9100")
-        self.btn_low = self._create_pill_btn(filter_frame, "LOW RISK", "Low", "#00C853")
-        
+        self.btn_low = self._create_pill_btn(filter_frame, "LOW RISK", "Low", "#00C853")        
         self.note_filter_var = ctk.StringVar(value="All Students")
         self.note_filter = ctk.CTkComboBox(filter_frame, values=["All Students", "No Notes", "Active Notes", "Follow-Up Required", "Critical Cases", "Closed Cases"], 
                                            variable=self.note_filter_var, command=self.filter_list, width=170, height=32, corner_radius=16, 
@@ -1077,18 +1113,38 @@ class AnalyticsPanel(ctk.CTkFrame):
                     filtered_students.append(s)
 
             processed_students = []
-            counts = {"High": 0, "Medium": 0, "Low": 0, "All": 0}
+            counts = {"High": 0, "Medium": 0, "Low": 0, "Pending": 0, "All": 0}
             
+            import json
             for s in filtered_students:
-                report = self.ai.analyze(s)
+                # Use precomputed AI data if available from SQLite join
+                score = s.get('risk_score')
+                level = s.get('risk_category')
                 
-                if 'score' in report and 'risk_score' not in report:
-                    report['risk_score'] = report['score']
-                if 'level' in report and 'risk_category' not in report:
-                    report['risk_category'] = report['level']
+                # Fallback if somehow missing
+                if score is None or level is None:
+                    score = 0.0
+                    level = "Low"
+                    
+                report = {
+                    'score': score,
+                    'level': level,
+                    'risk_score': score,
+                    'risk_category': level,
+                    'confidence': s.get('confidence', 90)
+                }
+                
+                # Parse full report json if available for deep insights
+                try:
+                    report_json = s.get('report_json')
+                    if report_json:
+                        parsed = json.loads(report_json)
+                        report.update(parsed)
+                except Exception:
+                    pass
                     
                 counts["All"] += 1
-                counts[report['level']] += 1
+                counts[level] += 1
                 processed_students.append((s, report))
                 
             self.after(0, lambda: self._render_filtered_list(processed_students, counts))
@@ -1141,6 +1197,7 @@ class AnalyticsPanel(ctk.CTkFrame):
         level = report.get('level', 'Low')
         if level == "High": r_col, dim_col = "#FF5555", "#4d0000"
         elif level == "Medium": r_col, dim_col = "#FF9100", "#4d2b00"
+        elif level == "Pending": r_col, dim_col = "#7A849C", "#2A2E3F"
         else: r_col, dim_col = "#00C853", "#004d20"
         
         strip = tk.Canvas(row_wrapper, width=4, height=64, bg=r_col, highlightthickness=0)
@@ -1180,21 +1237,28 @@ class AnalyticsPanel(ctk.CTkFrame):
             child.bind("<Enter>", on_enter)
             child.bind("<Leave>", on_leave)
 
-        btn_diag = ctk.CTkButton(row_wrapper, text="DIAGNOSE →", width=100, height=34, corner_radius=17,
-                                 fg_color="transparent", border_width=1, border_color="#00E5FF", text_color="#00E5FF",
-                                 hover_color="#00E5FF", command=lambda d=s, r=report: self.open_deep_analysis(d, r))
-        def diag_enter(e, b=btn_diag, rw=row_wrapper): b.configure(text_color="black"); rw.configure(fg_color="#242424")
-        def diag_leave(e, b=btn_diag, rw=row_wrapper): b.configure(text_color="#00E5FF"); rw.configure(fg_color=COLORS["card"])
-        btn_diag.bind("<Enter>", diag_enter, add="+")
-        btn_diag.bind("<Leave>", diag_leave, add="+")
-        btn_diag.pack(side="right", padx=15, pady=15)
+        if level == "Pending":
+            btn_diag = ctk.CTkLabel(row_wrapper, text="Data Needed", font=("Arial", 12, "bold"), text_color="gray", width=100)
+            btn_diag.pack(side="right", padx=15, pady=15)
+        else:
+            btn_diag = ctk.CTkButton(row_wrapper, text="DIAGNOSE →", width=100, height=34, corner_radius=17,
+                                     fg_color="transparent", border_width=1, border_color="#00E5FF", text_color="#00E5FF",
+                                     hover_color="#00E5FF", command=lambda d=s, r=report: self.open_deep_analysis(d, r))
+            def diag_enter(e, b=btn_diag, rw=row_wrapper): b.configure(text_color="black"); rw.configure(fg_color="#242424")
+            def diag_leave(e, b=btn_diag, rw=row_wrapper): b.configure(text_color="#00E5FF"); rw.configure(fg_color=COLORS["card"])
+            btn_diag.bind("<Enter>", diag_enter, add="+")
+            btn_diag.bind("<Leave>", diag_leave, add="+")
+            btn_diag.pack(side="right", padx=15, pady=15)
 
         metrics_f = ctk.CTkFrame(row_wrapper, fg_color="transparent")
         metrics_f.pack(side="right", padx=15, pady=15)
         
         score_pill = ctk.CTkFrame(metrics_f, fg_color=dim_col, corner_radius=12, height=24)
         score_pill.pack(side="left", padx=5)
-        ctk.CTkLabel(score_pill, text=f"Score: {report.get('risk_score', 0):.1f}", font=("Arial", 11), text_color=r_col).pack(padx=8, pady=2)
+        if level == "Pending":
+            ctk.CTkLabel(score_pill, text="Insufficient Data", font=("Arial", 11), text_color=r_col).pack(padx=8, pady=2)
+        else:
+            ctk.CTkLabel(score_pill, text=f"Score: {report.get('risk_score', 0):.1f}", font=("Arial", 11), text_color=r_col).pack(padx=8, pady=2)
         
         if s.get('avg_attendance') is not None:
             att_pill = ctk.CTkFrame(metrics_f, fg_color="#222222", corner_radius=12, height=24)
@@ -1285,17 +1349,31 @@ class AnalyticsPanel(ctk.CTkFrame):
         is_email_missing = p_email == 'Not Provided' or not p_email
         branch_name = self.translator.get_name(self.current_branch)
 
+        has_email = bool(
+            (data.get("email") or "").strip() or
+            (data.get("parent_email") or "").strip()
+        )
+        btn_notify_state = "normal" if has_email else "disabled"
+        btn_notify_text = "🔔 Notify" if has_email else "🔔 No Email on Record"
+
         def send_email_alert():
-            from logic.email_service import EmailService
-            
             emails_to_send = []
-            if data.get("email"): emails_to_send.append(data["email"])
-            if data.get("parent_email"): emails_to_send.append(data["parent_email"])
+            student_email = (data.get("email") or "").strip()
+            parent_email = (data.get("parent_email") or "").strip()
+            if student_email:
+                emails_to_send.append(student_email)
+            if parent_email:
+                emails_to_send.append(parent_email)
             
             if not emails_to_send:
-                ModernMessagebox("No Contact Info", "No email addresses found for this student.", "warning")
+                ModernMessagebox(
+                    "No Contact Information",
+                    "No email address is recorded for this student or their parent in the ERP database. The alert cannot be sent.",
+                    "error"
+                )
                 return
-                
+            
+            from logic.email_service import EmailService
             es = EmailService()
             success = es.send_early_warning_alert(
                 to_emails=emails_to_send,
@@ -1307,9 +1385,9 @@ class AnalyticsPanel(ctk.CTkFrame):
             )
             
             if success:
-                ModernMessagebox("Success", f"Alert successfully sent to {', '.join(emails_to_send)}", "success")
+                ModernMessagebox("Alert Sent", f"Early warning alert sent to: {', '.join(emails_to_send)}", "success")
             else:
-                ModernMessagebox("Error", "Failed to send email alert. Check console.", "error")
+                ModernMessagebox("Send Failed", "The alert could not be sent. Please check the email configuration.", "error")
 
         # --- LEFT PANEL (320px, Fixed Summary) ---
         left_panel = ctk.CTkFrame(top, width=320, fg_color=COLORS["sidebar"], corner_radius=0, border_width=0, border_color=COLORS["border"])
@@ -1376,13 +1454,14 @@ class AnalyticsPanel(ctk.CTkFrame):
             btn_add_contact.pack(pady=10)
 
         btn_notify = ctk.CTkButton(
-            left_panel, 
-            text="🔔 Notify", 
-            fg_color="#00E5FF", 
-            hover_color="#00B8D4",
-            text_color="black",
+            left_panel,
+            text=btn_notify_text,
+            fg_color="#00E5FF" if has_email else "#2A2E3F",
+            hover_color="#00B8D4" if has_email else "#2A2E3F",
+            text_color="black" if has_email else "#7A849C",
             font=FONTS["h3"],
             height=40,
+            state=btn_notify_state,
             command=send_email_alert
         )
         btn_notify.pack(side="bottom", fill="x", padx=20, pady=20)
@@ -1503,70 +1582,68 @@ class AnalyticsPanel(ctk.CTkFrame):
             ctk.CTkLabel(contrib_card, text="No contribution data available.", text_color="#555", font=FONTS["caption"]).pack(pady=20)
 
         # 4. TREND ANALYSIS
-        trend_info = report.get('trend_info')
-        has_trend_visuals = trend_info and trend_info.get("history") and len(trend_info["history"]) > 1
-        has_trend_line = not report.get('is_first_year', False)
+        make_section_title(scroll, "TREND ANALYSIS")
+        trend_card = ctk.CTkFrame(scroll, fg_color="#12141E", border_width=0, corner_radius=8)
+        trend_card.pack(fill="x", pady=5)
         
-        if has_trend_visuals or has_trend_line:
-            make_section_title(scroll, "TREND ANALYSIS")
-            
-            if has_trend_visuals:
-                trend_card = ctk.CTkFrame(scroll, fg_color="#12141E", border_width=0, corner_radius=8)
-                trend_card.pack(fill="x", pady=5)
+        # Gather semester history — use session cache directly by student_id
+        sid_for_history = str(data.get('student_id', data.get('id', '')))
+        from logic.session_cache import get_session_cache
+        _cache = get_session_cache()
+        semester_history = _cache.get_semester_history(sid_for_history) if _cache else []
+        
+        # Normalize history keys to standard format
+        normalized_history = []
+        for h in semester_history:
+            normalized_history.append({
+                'semester_number': h.get('semester_number', h.get('semester', 0)),
+                'cgpa': float(h.get('cgpa_that_semester', h.get('cgpa', 0.0)) or 0.0),
+                'attendance': float(h.get('attendance_that_semester', h.get('attendance', 0.0)) or 0.0),
+                'backlogs': int(h.get('backlogs_that_semester', h.get('backlogs', 0)) or 0),
+            })
+        num_sems = len(normalized_history)
+        
+        if num_sems == 0:
+            # No history recorded yet
+            no_hist_frame = ctk.CTkFrame(trend_card, fg_color="#1A1D2D", corner_radius=8)
+            no_hist_frame.pack(fill="x", padx=20, pady=20)
+            ctk.CTkLabel(no_hist_frame, text="⚠️", font=("Arial", 24)).pack(pady=(15, 5))
+            ctk.CTkLabel(no_hist_frame,
+                text="No semester history is available for this student. Trend analysis will become available after the completion of their first semester.",
+                text_color="#a1a1aa", font=FONTS["caption"], wraplength=500, justify="center"
+            ).pack(padx=20, pady=(0, 15))
+        elif num_sems == 1:
+            # Semester 1 snapshot only
+            sem = normalized_history[0]
+            snap_frame = ctk.CTkFrame(trend_card, fg_color="#1A1D2D", corner_radius=8)
+            snap_frame.pack(fill="x", padx=20, pady=20)
+            ctk.CTkLabel(snap_frame, text="📊 Semester 1 Snapshot", font=("Arial", 14, "bold"), text_color="#00E5FF").pack(pady=(15, 5))
+            ctk.CTkLabel(snap_frame,
+                text=f"CGPA: {sem.get('cgpa', 0):.2f}   |   Attendance: {sem.get('attendance', 0):.1f}%   |   Backlogs: {sem.get('backlogs', 0)}\n"
+                     "A minimum of two completed semesters is required for trend analysis.",
+                text_color="#a1a1aa", font=FONTS["caption"], wraplength=500, justify="center"
+            ).pack(padx=20, pady=(0, 15))
+        else:
+            # 2+ semesters — show real trend chart
+            try:
+                from logic.trend_engine import TrendAnalyzer
+                t_info = TrendAnalyzer().analyze_history(normalized_history)
+                t_info["history"] = normalized_history
                 
                 t_head = ctk.CTkFrame(trend_card, fg_color="transparent")
-                t_head.pack(fill="x", padx=20, pady=(15, 10))
+                t_head.pack(fill="x", padx=20, pady=(15, 5))
+                t_status = t_info.get("trend_status", "Stable")
+                t_color = COLORS["success"] if "Improv" in t_status else (COLORS["danger"] if "Declin" in t_status or "Critical" in t_status else "gray")
+                ctk.CTkLabel(t_head, text=f"Trend: {t_status}", font=FONTS["body"], text_color=t_color).pack(side="left")
+                ctk.CTkLabel(t_head, text=f"Score: {t_info.get('trend_score', 50)}/100", font=FONTS["body"], text_color="white").pack(side="right")
                 
-                t_status = trend_info.get("trend_status", "Unknown")
-                t_color = COLORS["success"] if "Improving" in t_status else (COLORS["danger"] if "Decline" in t_status else "gray")
-                
-                ctk.CTkLabel(t_head, text=f"Trend Score: {trend_info.get('trend_score', 0)}/100", font=FONTS["body"], text_color="white").pack(side="left")
-                ctk.CTkLabel(t_head, text=f"Status: {t_status}", font=FONTS["body"], text_color=t_color).pack(side="right")
-                
-                try:
-                    from ui.trend_visuals import TrendVisuals
-                    TrendVisuals.create_trend_charts(trend_card, trend_info)
-                except Exception as e:
-                    print(f"Failed to render trend visuals: {e}")
-            
-            if has_trend_line:
-                t_card = ctk.CTkFrame(scroll, fg_color="#12141E", border_width=0, corner_radius=8)
-                t_card.pack(fill="x", pady=10)
-                
-                try:
-                    fig_t = Figure(figsize=(7, 2.2), dpi=100)
-                    fig_t.patch.set_facecolor("#12141E")
-                    ax_t = fig_t.add_subplot(111)
-                    ax_t.set_facecolor("#12141E")
-                    
-                    trend_vals = report.get('trends', {}).get('risk') or report.get('trend')
-                    if not trend_vals:
-                        trend_vals = [65, 70, 62, 68]
-                        
-                    t_len = len(trend_vals)
-                    ax_t.set_xticks(range(t_len))
-                    t_labels = [f"Sem {i+1}" for i in range(t_len)]
-                    if t_len > 0:
-                        t_labels[-1] = "Current"
-                        
-                    ax_t.set_xticklabels(t_labels, color='#a1a1aa')
-                    ax_t.plot(trend_vals, marker='o', color=COLORS["accent"], linewidth=2, markersize=6)
-                    ax_t.tick_params(colors='#a1a1aa', labelsize=8)
-                    
-                    # Modernize axes
-                    ax_t.spines['top'].set_visible(False)
-                    ax_t.spines['right'].set_visible(False)
-                    ax_t.spines['left'].set_color('#2A2E3F')
-                    ax_t.spines['bottom'].set_color('#2A2E3F')
-                    ax_t.grid(True, axis='y', color='#1A1D2D', linestyle='-', linewidth=1)
-                    
-                    fig_t.tight_layout()
-                    
-                    can_t = FigureCanvasTkAgg(fig_t, master=t_card)
-                    wid_t = can_t.get_tk_widget()
-                    wid_t.pack(fill="both", expand=True, padx=10, pady=10)
-                except Exception as e:
-                    pass
+                from ui.trend_visuals import TrendVisuals
+                TrendVisuals.create_trend_charts(trend_card, t_info)
+            except Exception as _te:
+                import logging as _tlog
+                _tlog.getLogger(__name__).error(f"Trend chart render error: {_te}")
+                ctk.CTkLabel(trend_card, text="Error rendering trend chart.", text_color="red").pack(pady=20)
+
 
         # 5. RECOMMENDED ACTIONS
         recs = report.get('recommendations', [])
@@ -1886,54 +1963,16 @@ class DashboardScreen(ctk.CTkFrame):
             self.content_container.grid(row=0, column=1, columnspan=1, sticky="nsew")
             self.sidebar.grid(row=0, column=0, sticky="nsew")
             user_type = self.controller.shared_data.get("user_type")
-            # Always default to the student-level dashboard (Analytics) upon login
+            # Dashboard opens only after LoadingScreen has fully populated
+            # the session cache. No background sync is needed here.
             self.show_view("Analytics")
-            
-            # Start Background Sync Layer
-            self.start_background_sync()
 
-    def start_background_sync(self):
-        erp_config = self.controller.shared_data.get("erp_config")
-        if not erp_config: return
-        
-        from logic.sync_worker import SyncWorker
-        import customtkinter as ctk
-        
-        self.sync_worker = SyncWorker(erp_config, self.controller.shared_data)
-        
-        def safe_progress(val, msg):
-            self.after(0, lambda: self._sync_progress(val, msg))
-            
-        def safe_finished(success, msg):
-            self.after(0, lambda: self._sync_finished(success, msg))
-            
-        self.sync_worker.connect_progress(safe_progress)
-        self.sync_worker.connect_finished(safe_finished)
-        
-        if not hasattr(self.sidebar, "sync_status_lbl"):
-            self.sidebar.sync_status_lbl = ctk.CTkLabel(self.sidebar, text="Syncing Master DB...", font=("Inter", 11), text_color="#00E5FF")
-            self.sidebar.sync_status_lbl.pack(side="bottom", pady=10)
-        else:
-            self.sidebar.sync_status_lbl.configure(text="Syncing Master DB...", text_color="#00E5FF")
-            
-        self.sync_worker.start()
 
-    def _sync_progress(self, val, msg):
-        if hasattr(self.sidebar, "sync_status_lbl"):
-            self.sidebar.sync_status_lbl.configure(text=f"Sync: {val}%")
 
-    def _sync_finished(self, success, msg):
-        if hasattr(self.sidebar, "sync_status_lbl"):
-            if success:
-                self.sidebar.sync_status_lbl.configure(text="Up to date (Cache)", text_color="#00C853")
-            else:
-                self.sidebar.sync_status_lbl.configure(text="Offline Mode (Cache)", text_color="#FF9100")
-            
-            # Refresh current view so UI updates instantly if new data arrived
-            if self.current_view_name and self.current_view_name in self.panels:
-                panel = self.panels[self.current_view_name]
-                if hasattr(panel, 'refresh'):
-                    panel.refresh()
+    # NOTE: start_background_sync(), _sync_progress(), _sync_finished() removed.
+    # Cache synchronization now happens exclusively in LoadingScreen via SyncWorker.
+    # All panels read from the fully-populated session cache (logic/session_cache.py).
+
 
     def show_view(self, name):
         if self.is_view_animating or self.current_view_name == name:

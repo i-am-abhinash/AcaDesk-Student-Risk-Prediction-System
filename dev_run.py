@@ -2,11 +2,18 @@ import os
 import sys
 import time
 import subprocess
+
+# Fix Windows console encoding for emoji/unicode output
+if sys.platform == "win32":
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+
 try:
     from watchdog.observers import Observer
     from watchdog.events import FileSystemEventHandler
 except ImportError:
-    print("❌ Watchdog is not installed. Run 'pip install watchdog' first.")
+    print("[DEV] ERROR: Watchdog is not installed. Run 'pip install watchdog' first.")
     sys.exit(1)
 
 class RestartHandler(FileSystemEventHandler):
@@ -26,32 +33,31 @@ class RestartHandler(FileSystemEventHandler):
 
     def on_modified(self, event):
         if event.src_path.endswith('.py'):
-            # Debounce
             current_time = time.time()
             if current_time - self.last_restart > 1:
-                print(f"\n🔄 [DEV] Change detected in {os.path.basename(event.src_path)}. Restarting...")
+                print(f"\n[DEV] Change detected in {os.path.basename(event.src_path)}. Restarting...")
                 self.last_restart = current_time
                 self.start_app()
 
 def main():
-    print("🚀 [DEV] Starting robust Auto-Reloader with Watchdog...")
+    print("[DEV] Starting robust Auto-Reloader with Watchdog...")
     print("Watching for changes in .py files. Press Ctrl+C to quit.\n")
-    
+
     event_handler = RestartHandler()
     observer = Observer()
-    
+
     observer.schedule(event_handler, path=".", recursive=True)
     observer.start()
-    
+
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\n🛑 [DEV] Stopping Auto-Reloader.")
+        print("\n[DEV] Stopping Auto-Reloader.")
         observer.stop()
         if event_handler.process and event_handler.process.poll() is None:
             event_handler.process.terminate()
-            
+
     observer.join()
 
 if __name__ == "__main__":

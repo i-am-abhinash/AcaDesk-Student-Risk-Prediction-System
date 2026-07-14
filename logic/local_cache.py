@@ -98,6 +98,8 @@ class LocalCache:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_student_year ON students_cache(year)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_student_branch_year ON students_cache(branch, year)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_notes_student ON faculty_notes(student_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_student ON ai_predictions(student_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_category ON ai_predictions(risk_category)")
             
             conn.commit()
 

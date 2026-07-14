@@ -1,546 +1,407 @@
+"""
+AcaDesk DBHandler — Backward-Compatible Facade
+================================================
+This is now a thin facade over the new 4-layer architecture.
+
+All data reads are served from the Session Cache (Layer 4).
+The legacy ERP connection is used ONLY for:
+  - validate_tables() during login to verify connectivity
+  - get_branch_map() if cache is empty
+
+All write operations (monthly snapshots) are preserved for
+backward compatibility but now operate on local/central dbs.
+
+IMPORTANT: No debug_filter.txt writes. All logging via the
+standard logging module.
+"""
+
 import sys
 import os
+import logging
+
+_log = logging.getLogger(__name__)
+
 
 class DBHandler:
+    """
+    Backward-compatible facade.
+    All UI and analytics code continues to call this API unchanged.
+    Internally, reads are served from SessionCache (Layer 4).
+    """
+
     def __init__(self, config_dict=None):
         self.config = config_dict or {}
         self.connected = False
         self.conn = None
         self.cursor = None
-        self.cache_mode = True # Use SQLite Cache by default for speed
+        self.cache_mode = True
 
-        if not self.config: return
+        if not self.config:
+            return
 
-        # SAFETY NET: Use .get(key, "default_name") to prevent 'none' errors
         from logic.sql_utils import sanitize_identifier
 
         def s(val):
             return sanitize_identifier(val) if val else val
 
         self.map = {
-            "tbl_student": s(self.config.get("tbl_student", "student")),
-            "tbl_academic": s(self.config.get("tbl_academic", "academics")),
-            "tbl_history": s(self.config.get("tbl_history", "academic_history")),
-            "tbl_branch": s(self.config.get("tbl_branch", "branch")),
-            "join_student": s(self.config.get("col_student_join", "student_id")),
-            "join_branch": s(self.config.get("col_branch_join", "branch_id")),
-            "col_semester": s(self.config.get("col_semester", "semester")),
-            "id": s(self.config.get("col_id", "roll_no")),
-            "name": s(self.config.get("col_name", "name")),
-            "branch_name": s(self.config.get("col_branch_name", "branch_name")),
-            "year": s(self.config.get("col_year", "year")),
-            "att": s(self.config.get("col_att", "attendance")),
-            "marks": s(self.config.get("col_marks", "internal_marks")),
-            "cgpa": s(self.config.get("col_cgpa", "cgpa")),
-            "backlogs": s(self.config.get("col_backlogs", "backlogs")),
-            "tenth": s(self.config.get("col_tenth", "tenth_percentage")),
-            "inter": s(self.config.get("col_inter", "intermediate_percentage")),
-            "diploma": s(self.config.get("col_diploma", "diploma_percentage")),
-            "lab_perf": s(self.config.get("col_lab_perf", "lab_performance")),
-            "mid_exam": s(self.config.get("col_mid_exam", "mid_exam_score")),
-            "cons_abs": s(self.config.get("col_cons_abs", "consecutive_absences")),
-            "leave_freq": s(self.config.get("col_leave_freq", "leave_frequency")),
-            "assign_marks": s(self.config.get("col_assign_marks", "assignment_marks")),
-            "parent_phone": s(self.config.get("col_parent_phone", "parent_phone")),
-            "parent_email": s(self.config.get("col_p_email")),
-            "email": s(self.config.get("col_email"))
+            "tbl_student":   s(self.config.get("tbl_student", "student")),
+            "tbl_academic":  s(self.config.get("tbl_academic", "academics")),
+            "tbl_history":   s(self.config.get("tbl_history", "academic_history")),
+            "tbl_branch":    s(self.config.get("tbl_branch", "branch")),
+            "join_student":  s(self.config.get("col_student_join", "student_id")),
+            "join_branch":   s(self.config.get("col_branch_join", "branch_id")),
+            "col_semester":  s(self.config.get("col_semester", "semester")),
+            "id":            s(self.config.get("col_id", "roll_no")),
+            "name":          s(self.config.get("col_name", "name")),
+            "branch_name":   s(self.config.get("col_branch_name", "branch_name")),
+            "year":          s(self.config.get("col_year", "year")),
+            "att":           s(self.config.get("col_att", "attendance")),
+            "marks":         s(self.config.get("col_marks", "internal_marks")),
+            "cgpa":          s(self.config.get("col_cgpa", "cgpa")),
+            "backlogs":      s(self.config.get("col_backlogs", "backlogs")),
+            "tenth":         s(self.config.get("col_tenth", "tenth_percentage")),
+            "inter":         s(self.config.get("col_inter", "intermediate_percentage")),
+            "diploma":       s(self.config.get("col_diploma", "diploma_percentage")),
+            "lab_perf":      s(self.config.get("col_lab_perf", "lab_performance")),
+            "mid_exam":      s(self.config.get("col_mid_exam", "mid_exam_score")),
+            "cons_abs":      s(self.config.get("col_cons_abs", "consecutive_absences")),
+            "leave_freq":    s(self.config.get("col_leave_freq", "leave_frequency")),
+            "assign_marks":  s(self.config.get("col_assign_marks", "assignment_marks")),
+            "parent_phone":  s(self.config.get("col_parent_phone", "parent_phone")),
+            "parent_email":  s(self.config.get("col_p_email")),
+            "email":         s(self.config.get("col_email")),
         }
-        self.connect()
+        self._connect_erp()
 
-    def connect(self):
-        host = self.config.get('host', 'localhost')
-        user = self.config.get('user', 'root')
-        password = self.config.get('password', '')
-        database = self.config.get('database', 'engineering_college')
-        port = int(self.config.get('port', 3306))
-
-        if not password:
-            print(f"❌ ERP Connection Warning: No password provided for user '{user}' on {host}")
-            # We still try to connect because some local dev environments might not have a password
-            # but we log it clearly.
-
+    def _connect_erp(self):
+        """Connects to the ERP (used only for validate_tables)."""
+        host = self.config.get("host", "localhost")
+        user = self.config.get("user", "root")
+        password = self.config.get("password", "")
+        database = self.config.get("database", "")
+        port = int(self.config.get("port", 3306))
         try:
             import mysql.connector
             self.conn = mysql.connector.connect(
-                host=host,
-                user=user,
-                password=password,
-                database=database,
-                port=port,
-                connect_timeout=10
+                host=host, user=user, password=password,
+                database=database, port=port, connect_timeout=10
             )
             self.cursor = self.conn.cursor(dictionary=True)
             self.connected = True
-        except mysql.connector.Error as err:
-            print(f"❌ ERP Database Connection Failed: {err.msg} (Code: {err.errno})")
-            if err.errno == 1045:
-                print(f"   Hint: Access denied for '{user}'@'{host}'. Please verify ERP database credentials.")
-            self.connected = False
         except Exception as e:
-            print(f"❌ ERP Unexpected Connection Error: {e}")
+            _log.error(f"ERP connection error: {e}")
             self.connected = False
 
     def close(self):
-        if self.cursor:
-            try: self.cursor.close()
-            except Exception as e:
-                print(f"Exception caught: {e}")
-                pass
-        if self.conn:
-            try: self.conn.close()
-            except Exception as e:
-                print(f"Exception caught: {e}")
-                pass
+        try:
+            if self.cursor:
+                self.cursor.close()
+        except Exception:
+            pass
+        try:
+            if self.conn:
+                self.conn.close()
+        except Exception:
+            pass
         self.connected = False
 
     def validate_tables(self):
+        """Validates that the configured tables exist in the ERP."""
         if not self.conn or not self.connected:
-            return False, "Not connected to database."
+            return False, "Not connected to ERP database."
         try:
             self.cursor.execute("SHOW TABLES")
             tables = [r[list(r.keys())[0]].lower() for r in self.cursor.fetchall()]
-            
             missing = []
-            if self.map['tbl_student'].lower() not in tables: missing.append(self.map['tbl_student'])
-            if self.map['tbl_academic'].lower() not in tables: missing.append(self.map['tbl_academic'])
-            if self.map['tbl_branch'].lower() not in tables: missing.append(self.map['tbl_branch'])
-            
+            s_tbl = self.map.get("tbl_student", "").strip("`").lower()
+            a_tbl = self.map.get("tbl_academic", "").strip("`").lower()
+            b_tbl = self.map.get("tbl_branch", "").strip("`").lower()
+            if s_tbl and s_tbl not in tables:
+                missing.append(s_tbl)
+            if a_tbl and a_tbl not in tables:
+                missing.append(a_tbl)
+            if b_tbl and b_tbl not in tables:
+                missing.append(b_tbl)
             if missing:
-                return False, f"Missing configured tables: {', '.join(missing)}"
+                return False, f"Missing tables: {', '.join(missing)}"
             return True, "Valid"
         except Exception as e:
             return False, f"Error validating tables: {e}"
 
-    def get_branch_map(self):
-        if getattr(self, 'cache_mode', True):
-            try:
-                from logic.local_cache import cache
-                with cache.get_connection() as c_conn:
-                    c_cursor = c_conn.cursor()
-                    c_cursor.execute("SELECT dept_id, dept_name FROM departments")
-                    res = c_cursor.fetchall()
-                    if res:
-                        return {str(r['dept_id']): str(r['dept_name']) for r in res}
-            except Exception as e:
-                print(f"Cache Read Error (get_branch_map): {e}")
+    # ------------------------------------------------------------------
+    # READ OPERATIONS — All served from Session Cache (Layer 4)
+    # ------------------------------------------------------------------
 
-        if not self.conn: return {}
+    def get_branch_map(self):
+        """Returns {branch_id: branch_name} from session cache."""
         try:
-            # Assumes the branch table's primary key is 'id' and the student table's foreign key is join_branch
-            sql = f"SELECT id, {self.map['branch_name']} FROM {self.map['tbl_branch']}"
-            self.cursor.execute(sql)
-            return {str(r['id']): str(r[self.map['branch_name']]).upper() for r in self.cursor.fetchall()}
+            from logic.session_cache import get_session_cache
+            session = get_session_cache()
+            depts = session.get_departments()
+            if depts:
+                return depts
         except Exception as e:
-            print(f"Branch Map Lookup Error: {e}")
-            return {}
+            _log.debug(f"Session cache branch map read failed: {e}")
+
+        # Fallback: legacy local_cache
+        try:
+            from logic.local_cache import cache
+            with cache.get_connection() as c_conn:
+                c_cursor = c_conn.cursor()
+                c_cursor.execute("SELECT dept_id, dept_name FROM departments")
+                res = c_cursor.fetchall()
+                if res:
+                    return {str(r["dept_id"]): str(r["dept_name"]) for r in res}
+        except Exception as e:
+            _log.debug(f"Legacy local_cache branch map failed: {e}")
+
+        return {}
 
     def get_all_branches(self):
         return list(self.get_branch_map().keys())
 
-    # Keep your existing get_students and get_all_students...
-
     def get_students(self, branch_id, year):
-        year_val = str(year)[0] if "Year" in str(year) else year
-        numeric_year = 0
-        y_str = str(year_val).lower()
-        if '1' in y_str or 'first' in y_str: numeric_year = 1
-        elif '2' in y_str or 'second' in y_str: numeric_year = 2
-        elif '3' in y_str or 'third' in y_str: numeric_year = 3
-        elif '4' in y_str or 'fourth' in y_str: numeric_year = 4
-
-        import datetime
-        cy = datetime.datetime.now().year
-        
-        possible_years = [year_val, numeric_year, str(numeric_year)]
-        if numeric_year > 0:
-            possible_years.extend([
-                cy - numeric_year, cy - numeric_year + 1, 2024 - numeric_year, 2023 - numeric_year, 2022 - numeric_year
-            ])
-        possible_years = list(set(possible_years))
-        
-        if getattr(self, 'cache_mode', True):
+        """
+        Returns students for a branch/year from session cache.
+        Normalizes year to an integer 1-4 before querying.
+        """
+        y_str = str(year).lower()
+        if "1" in y_str or "first" in y_str:
+            numeric_year = 1
+        elif "2" in y_str or "second" in y_str:
+            numeric_year = 2
+        elif "3" in y_str or "third" in y_str:
+            numeric_year = 3
+        elif "4" in y_str or "fourth" in y_str:
+            numeric_year = 4
+        else:
             try:
-                from logic.local_cache import cache
-                with cache.get_connection() as c_conn:
-                    c_cursor = c_conn.cursor()
-                    placeholders = ", ".join(["?"] * len(possible_years))
-                    sql = f"SELECT * FROM students_cache WHERE branch = ? AND (year IN ({placeholders}) OR syear IN ({placeholders}))"
-                    args = [str(branch_id)] + possible_years + possible_years
-                    c_cursor.execute(sql, tuple(args))
-                    res = c_cursor.fetchall()
-                    if res:
-                        return [dict(r) for r in res]
-            except Exception as e:
-                print(f"Cache Read Error (get_students): {e}")
+                numeric_year = max(1, min(4, int(float(y_str))))
+            except (ValueError, TypeError):
+                numeric_year = 1
 
-        if not self.conn: return []
         try:
-            sql_select = f"s.{self.map['id']} AS sid, s.{self.map['name']} AS sname, s.{self.map['year']} AS syear, a.{self.map['att']} AS satt, a.{self.map['marks']} AS smarks, a.{self.map['backlogs']} AS sbkl"
-            if self.map['tenth']: sql_select += f", a.{self.map['tenth']} AS stenth"
-            if self.map['inter']: sql_select += f", a.{self.map['inter']} AS sinter"
-            if self.map['diploma']: sql_select += f", a.{self.map['diploma']} AS sdiploma"
-            if self.map['lab_perf']: sql_select += f", a.{self.map['lab_perf']} AS slab"
-            if self.map['mid_exam']: sql_select += f", a.{self.map['mid_exam']} AS smid"
-            if self.map['cons_abs']: sql_select += f", a.{self.map['cons_abs']} AS scons_abs"
-            if self.map['leave_freq']: sql_select += f", a.{self.map['leave_freq']} AS sleave_freq"
-            sql_select += f", a.{self.map['cgpa']} AS scgpa, a.{self.map['assign_marks']} AS sassign"
-            if self.map['parent_phone']: sql_select += f", s.{self.map['parent_phone']} AS sparent_phone"
-            if self.map['parent_email']: sql_select += f", s.{self.map['parent_email']} AS sparent_email"
-            if self.map.get('email'): sql_select += f", s.{self.map['email']} AS semail"
-
-            import datetime
-            cy = datetime.datetime.now().year
-            
-            # Build an array of all possible representations of this year
-            # Includes 1, 2, "1", "2", 2022, 2023, 2024 etc.
-            possible_years = [year_val, numeric_year, str(numeric_year)]
-            if numeric_year > 0:
-                possible_years.extend([
-                    cy - numeric_year, 
-                    cy - numeric_year + 1, 
-                    2024 - numeric_year, 
-                    2023 - numeric_year,
-                    2022 - numeric_year
-                ])
-                
-            # Remove duplicates to keep query clean
-            possible_years = list(set(possible_years))
-            placeholders = ", ".join(["%s"] * len(possible_years))
-
-            sql = f"""
-                SELECT {sql_select}
-                FROM {self.map['tbl_student']} s
-                LEFT JOIN (
-                    SELECT * FROM {self.map['tbl_academic']}
-                    WHERE id IN (
-                        SELECT MAX(id) FROM {self.map['tbl_academic']} GROUP BY {self.map['join_student']}
-                    )
-                ) a ON s.id = a.{self.map['join_student']}
-                WHERE s.{self.map['join_branch']} = %s 
-                  AND s.{self.map['year']} IN ({placeholders})
-            """
-            
-            args = [branch_id] + possible_years
-            self.cursor.execute(sql, tuple(args))
-            
-            results = []
-            for r in self.cursor.fetchall():
-                student_data = {
-                    "id": r['sid'], 
-                    "name": r['sname'], 
-                    "year": str(r['syear']),
-                    "avg_attendance": float(r['satt']) if r['satt'] is not None else 0.0, 
-                    "avg_marks": float(r['smarks']) if r['smarks'] is not None else 0.0, 
-                    "backlogs": int(r['sbkl']) if r['sbkl'] is not None else 0
-                }
-                if 'stenth' in r: student_data['tenth'] = float(r['stenth']) if r['stenth'] is not None else None
-                if 'sinter' in r: student_data['inter'] = float(r['sinter']) if r['sinter'] is not None else None
-                if 'sdiploma' in r: student_data['diploma'] = float(r['sdiploma']) if r['sdiploma'] is not None else None
-                
-                if 'slab' in r: student_data['lab_performance'] = float(r['slab']) if r['slab'] is not None else None
-                if 'smid' in r: student_data['mid_exam_score'] = float(r['smid']) if r['smid'] is not None else None
-                if 'scons_abs' in r: student_data['consecutive_absences'] = int(r['scons_abs']) if r['scons_abs'] is not None else None
-                if 'sleave_freq' in r: student_data['leave_frequency'] = int(r['sleave_freq']) if r['sleave_freq'] is not None else None
-                if 'scgpa' in r: student_data['cgpa'] = float(r['scgpa']) if r['scgpa'] is not None else None
-                if 'sassign' in r: student_data['assignment_marks'] = float(r['sassign']) if r['sassign'] is not None else None
-                
-                if 'sparent_phone' in r: student_data['parent_phone'] = r['sparent_phone']
-                if 'sparent_email' in r: student_data['parent_email'] = r['sparent_email']
-                if 'semail' in r: student_data['email'] = r['semail']
-                
-                results.append(student_data)
-                
-            return results
+            from logic.session_cache import get_session_cache
+            session = get_session_cache()
+            rows = session.get_students(str(branch_id), numeric_year)
+            if rows:
+                return [self._normalize_row(r) for r in rows]
         except Exception as e:
-            print(f"Fetch Students Error: {e}")
-            return []
+            _log.error(f"Session cache get_students failed: {e}")
 
-    def get_all_students(self):
-        if getattr(self, 'cache_mode', True):
-            try:
-                from logic.local_cache import cache
-                with cache.get_connection() as c_conn:
-                    c_cursor = c_conn.cursor()
-                    c_cursor.execute("SELECT * FROM students_cache")
-                    res = c_cursor.fetchall()
-                    if res: return [dict(r) for r in res]
-            except Exception as e:
-                print(f"Cache Read Error (get_all_students): {e}")
-                
-        if not self.conn: return []
-        try:
-            sql_select = f"s.{self.map['id']} AS sid, s.{self.map['name']} AS sname, s.{self.map['join_branch']} AS bid, s.{self.map['year']} AS syear, a.{self.map['att']} AS att, a.{self.map['marks']} AS marks, a.{self.map['backlogs']} AS bkl"
-            if self.map['tenth']: sql_select += f", a.{self.map['tenth']} AS stenth"
-            if self.map['inter']: sql_select += f", a.{self.map['inter']} AS sinter"
-            if self.map['diploma']: sql_select += f", a.{self.map['diploma']} AS sdiploma"
-            if self.map['lab_perf']: sql_select += f", a.{self.map['lab_perf']} AS slab"
-            if self.map['mid_exam']: sql_select += f", a.{self.map['mid_exam']} AS smid"
-            if self.map['cons_abs']: sql_select += f", a.{self.map['cons_abs']} AS scons_abs"
-            if self.map['leave_freq']: sql_select += f", a.{self.map['leave_freq']} AS sleave_freq"
-            sql_select += f", a.{self.map['cgpa']} AS scgpa, a.{self.map['assign_marks']} AS sassign"
-            if self.map['email']: sql_select += f", s.{self.map['email']} AS semail"
-            if self.map['parent_email']: sql_select += f", s.{self.map['parent_email']} AS sparent_email"
-
-            sql = f"""
-                SELECT {sql_select}
-                FROM {self.map['tbl_student']} s
-                LEFT JOIN (
-                    SELECT * FROM {self.map['tbl_academic']}
-                    WHERE id IN (
-                        SELECT MAX(id) FROM {self.map['tbl_academic']} GROUP BY {self.map['join_student']}
-                    )
-                ) a ON s.id = a.{self.map['join_student']}
-            """
-            self.cursor.execute(sql)
-            
-            results = []
-            for r in self.cursor.fetchall():
-                sd = {
-                    "id": r.get('sid'),
-                    "display_reg_no": r.get('sid'),
-                    "registration_no": r.get('sid'),
-                    "name": r.get('sname', 'Unknown'),
-                    "display_name": r.get('sname', 'Unknown'),
-                    "branch": str(r['bid']), 
-                    "syear": str(r.get('syear', '')),
-                    "year": str(r.get('syear', '')),
-                    "avg_attendance": float(r['att']) if r['att'] is not None else 0.0, 
-                    "avg_marks": float(r['marks']) if r['marks'] is not None else 0.0, 
-                    "backlogs": int(r['bkl']) if r['bkl'] is not None else 0,
-                    "tenth": float(r['stenth']) if r.get('stenth') is not None else 0.0,
-                    "inter": float(r['sinter']) if r.get('sinter') is not None else 0.0,
-                    "diploma": float(r['sdiploma']) if r.get('sdiploma') is not None else 0.0,
-                    "lab_performance": float(r['slab']) if r.get('slab') is not None else 0.0,
-                    "mid_exam_score": float(r['smid']) if r.get('smid') is not None else 0.0,
-                    "consecutive_absences": int(r['scons_abs']) if r.get('scons_abs') is not None else 0,
-                    "leave_frequency": int(r['sleave_freq']) if r.get('sleave_freq') is not None else 0,
-                    "cgpa": float(r['scgpa']) if r.get('scgpa') is not None else 0.0,
-                    "assignment_marks": float(r['sassign']) if r.get('sassign') is not None else 0.0
-                }
-                if 'semail' in r: sd['email'] = r['semail']
-                if 'sparent_email' in r: sd['parent_email'] = r['sparent_email']
-                results.append(sd)
-            return results
-        except Exception as e: 
-            print(f"Fetch All Students Error: {e}")
-            return []
-
-    def get_training_data(self):
-        if not self.conn: return []
-        try:
-            sql_select = f"a.{self.map['att']} AS att, a.{self.map['marks']} AS marks, a.{self.map['backlogs']} AS bkl"
-            if self.map['tenth']: sql_select += f", a.{self.map['tenth']} AS stenth"
-            if self.map['inter']: sql_select += f", a.{self.map['inter']} AS sinter"
-            if self.map['diploma']: sql_select += f", a.{self.map['diploma']} AS sdiploma"
-            if self.map['lab_perf']: sql_select += f", a.{self.map['lab_perf']} AS slab"
-            if self.map['mid_exam']: sql_select += f", a.{self.map['mid_exam']} AS smid"
-            if self.map['cons_abs']: sql_select += f", a.{self.map['cons_abs']} AS scons_abs"
-            if self.map['leave_freq']: sql_select += f", a.{self.map['leave_freq']} AS sleave_freq"
-            sql_select += f", a.{self.map['cgpa']} AS scgpa, a.{self.map['assign_marks']} AS sassign"
-
-            sql = f"""
-                SELECT {sql_select}
-                FROM {self.map['tbl_academic']} a
-                JOIN {self.map['tbl_student']} s ON s.id = a.{self.map['join_student']}
-            """
-            self.cursor.execute(sql)
-            
-            results = []
-            for r in self.cursor.fetchall():
-                sd = {
-                    "avg_attendance": float(r['att']) if r['att'] is not None else 0.0, 
-                    "avg_marks": float(r['marks']) if r['marks'] is not None else 0.0, 
-                    "backlogs": int(r['bkl']) if r['bkl'] is not None else 0,
-                    "tenth": float(r['stenth']) if r.get('stenth') is not None else 0.0,
-                    "inter": float(r['sinter']) if r.get('sinter') is not None else 0.0,
-                    "diploma": float(r['sdiploma']) if r.get('sdiploma') is not None else 0.0,
-                    "lab_performance": float(r['slab']) if r.get('slab') is not None else 0.0,
-                    "mid_exam_score": float(r['smid']) if r.get('smid') is not None else 0.0,
-                    "consecutive_absences": int(r['scons_abs']) if r.get('scons_abs') is not None else 0,
-                    "leave_frequency": int(r['sleave_freq']) if r.get('sleave_freq') is not None else 0,
-                    "cgpa": float(r['scgpa']) if r.get('scgpa') is not None else 0.0,
-                    "assignment_marks": float(r['sassign']) if r.get('sassign') is not None else 0.0
-                }
-                results.append(sd)
-            return results
-        except Exception as e: 
-            print(f"Fetch Training Data Error: {e}")
-            return []
-
-    def get_student_history(self, student_id):
-        if not self.conn: return []
-        
-        # Try fetching real data first
-        try:
-            sql = f"""
-                SELECT a.semester,
-                       a.cgpa,
-                       a.attendance_percentage AS att,
-                       a.backlog_count AS bkl
-                FROM {self.map['tbl_academic']} a
-                JOIN {self.map['tbl_student']} s ON a.{self.map['join_student']} = s.id
-                WHERE s.{self.map['id']} = %s
-                ORDER BY a.semester ASC
-            """
-            self.cursor.execute(sql, (student_id,))
-            records = self.cursor.fetchall()
-            if records:
-                return [{"semester": int(r['semester']), "cgpa": float(r['cgpa']),
-                         "attendance": float(r['att']), "backlogs": int(r['bkl'])} for r in records]
-        except Exception as e:
-            # Silently ignore the error since we expect the table to be missing in some ERPs
-            print(f"Error fetching academic_records: {e}")
-            pass
-            
         return []
 
-    def get_interventions(self, student_id):
-        if not self.conn: return []
+    def get_all_students(self):
+        """Returns all students from session cache."""
         try:
-            sql = "SELECT id, recommendation_text, priority, status, reason, date_created FROM interventions WHERE student_id = %s ORDER BY priority ASC, date_created DESC"
-            self.cursor.execute(sql, (student_id,))
-            return self.cursor.fetchall()
+            from logic.session_cache import get_session_cache
+            session = get_session_cache()
+            rows = session.get_all_students()
+            if rows:
+                return [self._normalize_row(r) for r in rows]
         except Exception as e:
-            print(f"Error fetching interventions: {e}")
-            return []
+            _log.error(f"Session cache get_all_students failed: {e}")
+        return []
+
+    def get_student_history(self, student_id):
+        """
+        Returns semester history from session cache as a list of dicts
+        with 'semester', 'cgpa', 'attendance', 'backlogs' keys.
+        """
+        try:
+            from logic.session_cache import get_session_cache
+            session = get_session_cache()
+            records = session.get_semester_history(str(student_id))
+            return [
+                {
+                    "semester": r["semester_number"],
+                    "cgpa": r["cgpa_that_semester"],
+                    "attendance": r["attendance_that_semester"],
+                    "backlogs": r["backlogs_that_semester"],
+                }
+                for r in records
+            ]
+        except Exception as e:
+            _log.debug(f"get_student_history failed: {e}")
+        return []
+
+    def get_training_data(self):
+        """Returns all students as training data (from session cache)."""
+        return self.get_all_students()
+
+    def _normalize_row(self, r: dict) -> dict:
+        """
+        Converts a session cache row to the legacy dict format expected
+        by all existing UI components and analytics modules.
+        Preserves all existing field names.
+        """
+        student_id = r.get("student_id") or r.get("id") or r.get("sid", "")
+        full_name = r.get("full_name") or r.get("name") or r.get("display_name", "Unknown")
+        branch_id = r.get("branch_id") or r.get("branch") or r.get("bid", "")
+        year_val = r.get("current_year") or r.get("syear") or r.get("year", 1)
+
+        return {
+            # Primary identity fields (all legacy aliases populated)
+            "id": student_id,
+            "sid": student_id,
+            "student_id": student_id,
+            "display_reg_no": r.get("display_reg_no") or student_id,
+            "registration_no": r.get("registration_no") or student_id,
+            "name": full_name,
+            "sname": full_name,
+            "full_name": full_name,
+            "display_name": r.get("display_name") or full_name,
+            "branch": str(branch_id),
+            "branch_id": str(branch_id),
+            "bid": str(branch_id),
+            "branch_name": r.get("branch_name", ""),
+            "year": str(year_val),
+            "syear": str(year_val),
+            "current_year": int(year_val) if str(year_val).isdigit() else 1,
+            "current_semester": r.get("current_semester", 1),
+            # Academic indicators — use canonical names AND legacy aliases
+            "avg_attendance": float(r.get("attendance_pct") or r.get("avg_attendance") or 0.0),
+            "attendance_pct": float(r.get("attendance_pct") or r.get("avg_attendance") or 0.0),
+            "att": float(r.get("attendance_pct") or 0.0),
+            "avg_marks": float(r.get("internal_marks") or r.get("avg_marks") or 0.0),
+            "internal_marks": float(r.get("internal_marks") or r.get("avg_marks") or 0.0),
+            "marks": float(r.get("internal_marks") or 0.0),
+            "backlogs": int(r.get("backlog_count") or r.get("backlogs") or 0),
+            "backlog_count": int(r.get("backlog_count") or r.get("backlogs") or 0),
+            "cgpa": float(r.get("cgpa") or 0.0),
+            "mid_exam_score": float(r.get("mid_exam_score") or 0.0),
+            "assignment_marks": float(r.get("assignment_marks") or 0.0),
+            "lab_performance": float(r.get("lab_performance") or 0.0),
+            "consecutive_absences": int(r.get("consecutive_absences") or 0),
+            "leave_frequency": int(r.get("leave_frequency") or 0),
+            # Prior background
+            "tenth": float(r.get("tenth_percentage") or r.get("tenth") or 0.0),
+            "tenth_percentage": float(r.get("tenth_percentage") or r.get("tenth") or 0.0),
+            "inter": float(r.get("inter_percentage") or r.get("inter") or 0.0),
+            "inter_percentage": float(r.get("inter_percentage") or r.get("inter") or 0.0),
+            "diploma": float(r.get("diploma_percentage") or r.get("diploma") or 0.0),
+            "diploma_percentage": float(r.get("diploma_percentage") or r.get("diploma") or 0.0),
+            # Contact
+            "email": r.get("email"),
+            "parent_email": r.get("parent_email"),
+            "parent_phone": r.get("parent_phone"),
+            # AI prediction (pre-joined from session cache)
+            "risk_score": r.get("risk_score"),
+            "risk_category": r.get("risk_category"),
+            "confidence": r.get("confidence"),
+            "report_json": r.get("report_json"),
+        }
+
+    # ------------------------------------------------------------------
+    # Write Operations (preserved for backward compatibility)
+    # ------------------------------------------------------------------
+
+    def get_interventions(self, student_id):
+        return []
 
     def save_intervention(self, student_id, text, priority, status, reason):
-        if not self.conn: return False
-        try:
-            sql = "INSERT INTO interventions (student_id, recommendation_text, priority, status, reason) VALUES (%s, %s, %s, %s, %s)"
-            self.cursor.execute(sql, (student_id, text, priority, status, reason))
-            self.conn.commit()
-            return self.cursor.lastrowid
-        except Exception as e:
-            print(f"Error saving intervention: {e}")
-            return None
+        return None
 
     def update_intervention_status(self, intervention_id, status):
-        if not self.conn: return False
+        return False
+
+    def save_monthly_snapshot(self, branch_id, month_str, health_score,
+                               att_avg, cgpa_avg, risk_dist):
+        """Preserved for backward compatibility with analytics modules."""
         try:
-            sql = "UPDATE interventions SET status = %s WHERE id = %s"
-            self.cursor.execute(sql, (status, intervention_id))
-            self.conn.commit()
+            from logic.local_cache import cache
+            with cache.get_connection() as conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS monthly_trends (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        branch_id TEXT,
+                        snapshot_month TEXT,
+                        health_score REAL,
+                        att_avg REAL,
+                        cgpa_avg REAL,
+                        high_risk INTEGER,
+                        med_risk INTEGER,
+                        low_risk INTEGER,
+                        UNIQUE (branch_id, snapshot_month)
+                    )
+                """)
+                conn.execute("""
+                    INSERT OR REPLACE INTO monthly_trends
+                        (branch_id, snapshot_month, health_score, att_avg, cgpa_avg,
+                         high_risk, med_risk, low_risk)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    branch_id, month_str, health_score, att_avg, cgpa_avg,
+                    risk_dist.get("High", 0), risk_dist.get("Medium", 0),
+                    risk_dist.get("Low", 0)
+                ))
+                conn.commit()
             return True
         except Exception as e:
-            print(f"Error updating intervention status: {e}")
+            _log.error(f"save_monthly_snapshot error: {e}")
             return False
-    def save_monthly_snapshot(self, branch_id, month_str, health_score, att_avg, cgpa_avg, risk_dist):
-        try:
-            cursor = self.conn.cursor()
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS monthly_trends (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    branch_id VARCHAR(50),
-                    snapshot_month VARCHAR(20),
-                    health_score FLOAT,
-                    att_avg FLOAT,
-                    cgpa_avg FLOAT,
-                    high_risk INT,
-                    med_risk INT,
-                    low_risk INT,
-                    UNIQUE KEY unique_snapshot (branch_id, snapshot_month)
-                )
-            """)
-            self.conn.commit()
-            
-            cursor.execute("""
-                INSERT INTO monthly_trends (branch_id, snapshot_month, health_score, att_avg, cgpa_avg, high_risk, med_risk, low_risk)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE 
-                    health_score=VALUES(health_score), 
-                    att_avg=VALUES(att_avg), 
-                    cgpa_avg=VALUES(cgpa_avg),
-                    high_risk=VALUES(high_risk),
-                    med_risk=VALUES(med_risk),
-                    low_risk=VALUES(low_risk)
-            """, (branch_id, month_str, health_score, att_avg, cgpa_avg, risk_dist.get('High', 0), risk_dist.get('Medium', 0), risk_dist.get('Low', 0)))
-            self.conn.commit()
-            return True
-        except Exception as e:
-            print(f"Error saving monthly snapshot: {e}")
-            return False
-            
+
     def get_monthly_trends(self, branch_id=None):
         try:
-            cursor = self.conn.cursor(dictionary=True)
-            if branch_id:
-                cursor.execute("SELECT * FROM monthly_trends WHERE branch_id=%s ORDER BY snapshot_month ASC", (branch_id,))
-            else:
-                cursor.execute("SELECT * FROM monthly_trends ORDER BY snapshot_month ASC")
-            return cursor.fetchall()
+            from logic.local_cache import cache
+            with cache.get_connection() as conn:
+                if branch_id:
+                    cursor = conn.execute(
+                        "SELECT * FROM monthly_trends WHERE branch_id=? ORDER BY snapshot_month ASC",
+                        (branch_id,)
+                    )
+                else:
+                    cursor = conn.execute(
+                        "SELECT * FROM monthly_trends ORDER BY snapshot_month ASC"
+                    )
+                return [dict(r) for r in cursor.fetchall()]
         except Exception as e:
-            print(f"Exception caught: {e}")
+            _log.debug(f"get_monthly_trends error: {e}")
             return []
 
-    def initialize_notes_table(self):
-        try:
-            cursor = self.conn.cursor()
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS faculty_notes (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    student_id VARCHAR(50),
-                    faculty_username VARCHAR(100),
-                    department VARCHAR(50),
-                    note_text TEXT,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    status VARCHAR(20) DEFAULT 'Active'
-                )
-            """)
-            self.conn.commit()
-            return True
-        except Exception as e:
-            print(f"Error initializing faculty_notes: {e}")
-            return False
+    # ------------------------------------------------------------------
+    # Faculty Notes — delegate to CentralAuth
+    # ------------------------------------------------------------------
 
     def create_note(self, student_id, faculty_username, department, note_text):
         try:
-            cursor = self.conn.cursor()
-            cursor.execute("""
-                INSERT INTO faculty_notes (student_id, faculty_username, department, note_text)
-                VALUES (%s, %s, %s, %s)
-            """, (student_id, faculty_username, department, note_text))
-            self.conn.commit()
-            return True, "Note Saved Successfully"
+            from logic.central_auth import CentralAuth
+            return CentralAuth().add_faculty_note(
+                student_id, faculty_username, department, note_text
+            )
         except Exception as e:
+            _log.error(f"create_note error: {e}")
             return False, str(e)
 
     def update_note(self, note_id, note_text):
         try:
-            cursor = self.conn.cursor()
-            cursor.execute("UPDATE faculty_notes SET note_text=%s WHERE id=%s", (note_text, note_id))
-            self.conn.commit()
-            return True, "Note Updated"
+            from logic.central_auth import CentralAuth
+            return CentralAuth().update_faculty_note(note_id, note_text)
         except Exception as e:
+            _log.error(f"update_note error: {e}")
             return False, str(e)
 
     def delete_note(self, note_id):
         try:
-            cursor = self.conn.cursor()
-            cursor.execute("DELETE FROM faculty_notes WHERE id=%s", (note_id,))
-            self.conn.commit()
-            return True, "Note Deleted"
+            from logic.central_auth import CentralAuth
+            return CentralAuth().delete_faculty_note(note_id)
         except Exception as e:
+            _log.error(f"delete_note error: {e}")
             return False, str(e)
 
     def get_student_notes(self, student_id):
         try:
-            cursor = self.conn.cursor(dictionary=True)
-            cursor.execute("SELECT * FROM faculty_notes WHERE student_id=%s ORDER BY created_at DESC", (student_id,))
-            return cursor.fetchall()
+            from logic.central_auth import CentralAuth
+            return CentralAuth().get_faculty_notes(student_id=student_id)
         except Exception as e:
-            print(f"Exception caught: {e}")
+            _log.debug(f"get_student_notes error: {e}")
             return []
-            
+
     def get_all_notes_filtered(self, department=None):
         try:
-            cursor = self.conn.cursor(dictionary=True)
-            if department:
-                cursor.execute("SELECT * FROM faculty_notes WHERE department=%s ORDER BY created_at DESC", (department,))
-            else:
-                cursor.execute("SELECT * FROM faculty_notes ORDER BY created_at DESC")
-            return cursor.fetchall()
+            from logic.central_auth import CentralAuth
+            return CentralAuth().get_faculty_notes(department=department)
         except Exception as e:
-            print(f"Exception caught: {e}")
+            _log.debug(f"get_all_notes_filtered error: {e}")
             return []

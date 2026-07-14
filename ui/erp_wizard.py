@@ -146,8 +146,44 @@ class ERPWizard(ctk.CTkFrame):
     def scan_success(self, results, all_tables, all_columns):
         self.btn_action.configure(state="normal")
         self.schema_results = results
-        self.all_tables = all_tables
-        self.all_columns = all_columns
+
+        # Flatten tables to sorted list of strings
+        if isinstance(all_tables, list):
+            if all_tables and isinstance(all_tables[0], dict):
+                self.all_tables = sorted([
+                    str(t.get("TABLE_NAME", t.get("table_name", "")))
+                    for t in all_tables if t
+                ])
+            else:
+                self.all_tables = sorted([str(t) for t in all_tables if t])
+        elif isinstance(all_tables, dict):
+            self.all_tables = sorted(all_tables.keys())
+        else:
+            self.all_tables = []
+
+        # Flatten columns to sorted "table.column" strings
+        flat_columns = []
+        if isinstance(all_columns, dict):
+            for tbl_name, col_list in all_columns.items():
+                if isinstance(col_list, list):
+                    for col in col_list:
+                        if isinstance(col, dict):
+                            col_name = col.get("COLUMN_NAME") or col.get("column_name") or ""
+                        else:
+                            col_name = str(col)
+                        if col_name.strip():
+                            flat_columns.append(f"{tbl_name}.{col_name}")
+        elif isinstance(all_columns, list):
+            flat_columns = [str(c) for c in all_columns if c]
+
+        self.all_columns = [""] + sorted(set(flat_columns))
+
+        _log = __import__('logging').getLogger(__name__)
+        _log.info(
+            "Wizard received %d tables, %d columns",
+            len(self.all_tables), len(self.all_columns)
+        )
+
         self.build_mapping_ui()
         self.show_step(2)
         self.lbl_scan_status.configure(text="Review Detected Schema", text_color=COLORS["success"])
@@ -177,7 +213,8 @@ class ERPWizard(ctk.CTkFrame):
             ctk.CTkLabel(tbl_row, text="Table:", font=("Arial", 12, "bold"), width=120, anchor="w").pack(side="left")
             tbl_var = ctk.StringVar(value=data["name"] or "")
             self.field_vars[title] = {"_table": tbl_var}
-            tbl_cb = ctk.CTkComboBox(tbl_row, values=[""] + self.all_tables, variable=tbl_var, width=250)
+            table_options = self.all_tables if self.all_tables else [""]
+            tbl_cb = ctk.CTkComboBox(tbl_row, values=table_options, variable=tbl_var, width=250)
             tbl_cb.pack(side="left", padx=10)
             
             # Columns
@@ -196,25 +233,99 @@ class ERPWizard(ctk.CTkFrame):
                 c_color = COLORS["success"] if c_conf >= 80 else (COLORS["warning"] if c_conf >= 50 else COLORS["danger"])
                 ctk.CTkLabel(row, text="●", text_color=c_color, width=20).pack(side="left")
                 
-                var = ctk.StringVar(value=col_data["name"] or "")
+                var = ctk.StringVar(value="")
                 self.field_vars[title][key] = var
                 
-                # Dynamic column choices based on currently selected table would be ideal, 
-                # but we'll use a simple Entry for overrides to keep it straightforward.
-                ent = ctk.CTkEntry(row, textvariable=var, width=200)
-                ent.pack(side="left", padx=10)
+                if col_data.get("is_ext"):
+                    # This is a Derived Aggregate or Linked Table, display badge
+                    disp_val = f"[{col_data['name']['type']}] {col_data['name'].get('resolved_table', '')}.{col_data['name'].get('resolved_column', '')}"
+                    var.set(disp_val)
+                    ent = ctk.CTkEntry(row, textvariable=var, width=200, state="disabled")
+                    ent.pack(side="left", padx=10)
+                else:
+                    detected_col_raw = col_data.get("name", "") or ""
+                    detected_table = col_data.get("table", "") or ""
+                    pre_selected = ""
+                    if detected_col_raw:
+                        candidate = f"{detected_table}.{detected_col_raw}" if detected_table else detected_col_raw
+                        if candidate in self.all_columns:
+                            pre_selected = candidate
+                        else:
+                            # Try matching any "table.column" ending with the detected column name
+                            matches = [c for c in self.all_columns
+                                       if c and c.split(".")[-1].lower() == detected_col_raw.lower()]
+                            if matches:
+                                pre_selected = matches[0]
+                    var.set(pre_selected)
+                    col_options = self.all_columns if self.all_columns else [""]
+                    ent = ctk.CTkComboBox(row, values=col_options, variable=var, width=200)
+                    ent.pack(side="left", padx=10)
 
-        create_group("Student Data", self.schema_results["tbl_student"], 
+        def mock_col(val, ext_val=None):
+            if ext_val:
+                return {"name": ext_val, "confidence": 100, "is_ext": True}
+            return {"name": val, "confidence": 100 if val else 0, "is_ext": False}
+            
+        res = self.schema_results
+        ext = res.get("mapping_extensions", {})
+        
+        student_data = {
+            "name": res.get("tbl_student", ""),
+            "confidence": 100 if res.get("tbl_student") else 0,
+            "columns": {
+                "join_student": mock_col(res.get("col_student_id")),
+                "col_name": mock_col(res.get("col_student_name")),
+                "join_branch": mock_col(res.get("col_branch_fk")),
+                "col_year": mock_col(res.get("col_student_year"), ext.get("current_year")),
+                "col_email": mock_col(res.get("col_email")),
+                "col_p_phone": mock_col(res.get("col_parent_phone"), ext.get("parent_phone")),
+                "col_p_email": mock_col(res.get("col_parent_email"), ext.get("parent_email"))
+            }
+        }
+        
+        academic_data = {
+            "name": res.get("tbl_academic", ""),
+            "confidence": 100 if res.get("tbl_academic") else 0,
+            "columns": {
+                "join_student": mock_col(res.get("col_academic_join")),
+                "col_attendance": mock_col(res.get("col_attendance"), ext.get("attendance_pct")),
+                "col_marks": mock_col(res.get("col_internal_marks")),
+                "col_backlogs": mock_col(res.get("col_backlogs"), ext.get("backlog_count")),
+                "col_tenth": mock_col(res.get("col_tenth")),
+                "col_inter": mock_col(res.get("col_inter")),
+                "col_diploma": mock_col(res.get("col_diploma")),
+                "col_lab": mock_col(res.get("col_lab_perf")),
+                "col_mid": mock_col(res.get("col_mid_exam")),
+                "col_cons_abs": mock_col(res.get("col_cons_abs")),
+                "col_leave": mock_col(res.get("col_leave_freq"))
+            }
+        }
+        
+        branch_data = {
+            "name": res.get("tbl_branch", ""),
+            "confidence": 100 if res.get("tbl_branch") else 0,
+            "columns": {
+                "join_branch": mock_col(res.get("col_branch_pk")),
+                "col_branch_name": mock_col(res.get("col_branch_name"))
+            }
+        }
+        
+        create_group("Student Data", student_data, 
                      ["join_student", "col_name", "join_branch", "col_year", "col_email", "col_p_phone", "col_p_email"], 
                      COLORS["accent"])
                      
-        create_group("Academic Data", self.schema_results["tbl_academic"], 
+        create_group("Academic Data", academic_data, 
                      ["join_student", "col_attendance", "col_marks", "col_backlogs", "col_tenth", "col_inter", "col_diploma", "col_lab", "col_mid", "col_cons_abs", "col_leave"], 
                      "#FF9100")
                      
-        create_group("Branch Data", self.schema_results["tbl_branch"], 
+        create_group("Branch Data", branch_data, 
                      ["join_branch", "col_branch_name"], 
                      "#E040FB")
+
+    def _col_only(self, full_ref: str) -> str:
+        if "." in full_ref:
+            return full_ref.split(".", 1)[1]
+        return full_ref
 
     def validate_and_save(self):
         self.btn_action.configure(state="disabled", text="VALIDATING...")
@@ -224,11 +335,11 @@ class ERPWizard(ctk.CTkFrame):
         a_tbl = self.field_vars["Academic Data"]["_table"].get()
         b_tbl = self.field_vars["Branch Data"]["_table"].get()
         
-        s_id = self.field_vars["Student Data"]["join_student"].get()
-        s_name = self.field_vars["Student Data"]["col_name"].get()
-        s_join = self.field_vars["Academic Data"]["join_student"].get()
+        s_id = self._col_only(self.field_vars["Student Data"]["join_student"].get())
+        s_name = self._col_only(self.field_vars["Student Data"]["col_name"].get())
+        s_join = self._col_only(self.field_vars["Academic Data"]["join_student"].get())
         
-        att = self.field_vars["Academic Data"]["col_attendance"].get()
+        att = self._col_only(self.field_vars["Academic Data"]["col_attendance"].get())
         
         # We need to construct the mapping dictionary compatible with the system
         mapping = {
@@ -236,24 +347,26 @@ class ERPWizard(ctk.CTkFrame):
             "tbl_academic": a_tbl, 
             "tbl_branch": b_tbl, 
             "col_student_join": s_join, 
-            "col_branch_join": self.field_vars["Student Data"]["join_branch"].get(), 
+            "col_branch_join": self._col_only(self.field_vars["Student Data"]["join_branch"].get()), 
             "col_id": s_id, 
             "col_name": s_name, 
-            "col_branch_name": self.field_vars["Branch Data"]["col_branch_name"].get(), 
+            "col_branch_name": self._col_only(self.field_vars["Branch Data"]["col_branch_name"].get()), 
             "col_att": att, 
-            "col_marks": self.field_vars["Academic Data"]["col_marks"].get(), 
-            "col_backlogs": self.field_vars["Academic Data"]["col_backlogs"].get(), 
-            "col_tenth": self.field_vars["Academic Data"]["col_tenth"].get(),
-            "col_inter": self.field_vars["Academic Data"]["col_inter"].get(),
-            "col_diploma": self.field_vars["Academic Data"]["col_diploma"].get(),
-            "col_lab_perf": self.field_vars["Academic Data"]["col_lab"].get(),
-            "col_mid_exam": self.field_vars["Academic Data"]["col_mid"].get(),
-            "col_cons_abs": self.field_vars["Academic Data"]["col_cons_abs"].get(),
-            "col_leave_freq": self.field_vars["Academic Data"]["col_leave"].get(),
-            "col_parent_phone": self.field_vars["Student Data"]["col_p_phone"].get(),
-            "col_parent_email": self.field_vars["Student Data"]["col_p_email"].get(),
-            "col_year": self.field_vars["Student Data"]["col_year"].get(), 
-            "col_email": self.field_vars["Student Data"]["col_email"].get()
+            "col_marks": self._col_only(self.field_vars["Academic Data"]["col_marks"].get()), 
+            "col_backlogs": self._col_only(self.field_vars["Academic Data"]["col_backlogs"].get()), 
+            "col_tenth": self._col_only(self.field_vars["Academic Data"]["col_tenth"].get()),
+            "col_inter": self._col_only(self.field_vars["Academic Data"]["col_inter"].get()),
+            "col_diploma": self._col_only(self.field_vars["Academic Data"]["col_diploma"].get()),
+            "col_lab_perf": self._col_only(self.field_vars["Academic Data"]["col_lab"].get()),
+            "col_mid_exam": self._col_only(self.field_vars["Academic Data"]["col_mid"].get()),
+            "col_cons_abs": self._col_only(self.field_vars["Academic Data"]["col_cons_abs"].get()),
+            "col_leave_freq": self._col_only(self.field_vars["Academic Data"]["col_leave"].get()),
+            "col_parent_phone": self._col_only(self.field_vars["Student Data"]["col_p_phone"].get()),
+            "col_parent_email": self._col_only(self.field_vars["Student Data"]["col_p_email"].get()),
+            "col_year": self._col_only(self.field_vars["Student Data"]["col_year"].get()),
+            "col_email": self._col_only(self.field_vars["Student Data"]["col_email"].get()),
+            "mapping_extensions": self.schema_results.get("mapping_extensions", {}),
+            "extended_features": self.schema_results.get("extended_features", [])
         }
         
         from logic.sql_utils import sanitize_identifier
@@ -266,13 +379,20 @@ class ERPWizard(ctk.CTkFrame):
                     ModernMessagebox("Validation Failed", f"Invalid SQL identifier in mapping for {k}: {str(e)}", "error")
                     return
         
+        host_val = self.host.get()
+        user_val = self.user.get()
+        pwd_val = self.pwd.get()
+        db_name_val = self.db_name.get()
+        port_val = int(self.port.get())
+
         def run_test():
             try:
-                sql = f"SELECT s.{s_id}, s.{s_name}, a.{att} FROM {s_tbl} s JOIN {a_tbl} a ON s.{s_id} = a.{s_join} LIMIT 3"
+                att_select = f", a.{att}" if att else ""
+                sql = f"SELECT s.{s_id}, s.{s_name}{att_select} FROM {s_tbl} s JOIN {a_tbl} a ON s.{s_id} = a.{s_join} LIMIT 3"
                 import mysql.connector
                 conn = mysql.connector.connect(
-                    host=self.host.get(), user=self.user.get(), password=self.pwd.get(), 
-                    database=self.db_name.get(), port=int(self.port.get()), connect_timeout=3
+                    host=host_val, user=user_val, password=pwd_val, 
+                    database=db_name_val, port=port_val, connect_timeout=3
                 )
                 cursor = conn.cursor(dictionary=True)
                 cursor.execute(sql)
@@ -284,7 +404,8 @@ class ERPWizard(ctk.CTkFrame):
                 else:
                     self.after(0, lambda: self.on_validation_fail("Tables joined successfully but returned 0 records."))
             except Exception as e:
-                self.after(0, lambda: self.on_validation_fail(str(e)))
+                error_msg = str(e)
+                self.after(0, lambda msg=error_msg: self.on_validation_fail(msg))
                 
         threading.Thread(target=run_test, daemon=True).start()
 

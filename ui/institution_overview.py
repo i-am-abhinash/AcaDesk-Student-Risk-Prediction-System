@@ -54,42 +54,61 @@ class InstitutionOverviewPanel(ctk.CTkFrame):
 
     def _fetch_data_thread(self):
         try:
-            erp_conf = self.controller.shared_data.get("erp_config")
-            if not erp_conf:
-                self.after(0, self._render_error, "Database configuration missing.")
-                return
-                
-            db = DBHandler(erp_conf)
-            predictor = AdvancedRiskPredictor(db)
+            from logic.session_cache import get_dashboard_summary
+            summary_data = get_dashboard_summary()
             
             user_type = self.controller.shared_data.get("user_type")
             assigned_dept = self.controller.shared_data.get("assigned_department")
-            target_branch_id = assigned_dept if user_type == "HOD" else None
+            target_branch = str(assigned_dept) if user_type == "HOD" else None
             
-            branch_map = db.get_branch_map()
+            total_students = 0
+            overall_risk_counts = {"High": 0, "Medium": 0, "Low": 0, "Pending": 0}
+            dept_stats = {}
             
-            # Use the optimized fast batch analytics engine
-            from logic.institutional_analytics import InstitutionalAnalytics
-            
-            analytics_data = InstitutionalAnalytics.compute_dashboard_data(db, predictor, branch_map, target_branch_id)
-            
-            if not analytics_data or analytics_data["total_students"] == 0:
-                self.after(0, self._render_error, "No student records found in the database.", COLORS.get("warning", "#FF9100"))
+            for row in summary_data:
+                bid = str(row["branch_id"])
+                if target_branch and bid != target_branch:
+                    continue
+                    
+                bname = row["branch_name"]
+                if bname not in dept_stats:
+                    dept_stats[bname] = {
+                        "Total": 0, "High": 0, "Medium": 0, "Low": 0, "Pending": 0,
+                        "health_score": 0, "avg_attendance": 0, "avg_cgpa": 0,
+                        "_att_sum": 0, "_cgpa_sum": 0
+                    }
+                
+                lvl = row["risk_level"]
+                cnt = row["count"]
+                
+                total_students += cnt
+                if lvl in overall_risk_counts: overall_risk_counts[lvl] += cnt
+                if lvl in dept_stats[bname]: dept_stats[bname][lvl] += cnt
+                dept_stats[bname]["Total"] += cnt
+                
+                dept_stats[bname]["_att_sum"] += (row["avg_att"] or 0) * cnt
+                dept_stats[bname]["_cgpa_sum"] += (row["avg_cgpa"] or 0) * cnt
+
+            if total_students == 0:
+                self.after(0, self._render_error, "No student records found in the session cache.", COLORS.get("warning", "#FF9100"))
                 return
                 
-            # Convert analytics_data back to the format UI expects
-            dept_stats = {}
-            for dept_name, stats in analytics_data["ranked_departments"]:
-                # Ensure keys match UI expectations
-                stats["Total"] = stats.get("total", 0)
-                dept_stats[dept_name] = stats
-                
-            best_branch = analytics_data["ranked_departments"][0][0] if analytics_data["ranked_departments"] else "N/A"
-            worst_branch = analytics_data["ranked_departments"][-1][0] if analytics_data["ranked_departments"] else "N/A"
+            for bname, stats in dept_stats.items():
+                t = stats["Total"]
+                if t > 0:
+                    stats["avg_attendance"] = stats["_att_sum"] / t
+                    stats["avg_cgpa"] = stats["_cgpa_sum"] / t
+                    h = stats["High"]
+                    m = stats["Medium"]
+                    stats["health_score"] = max(0, min(100, 100 - ((h * 1.0) + (m * 0.5)) / t * 100))
+                    
+            ranked = sorted(dept_stats.keys(), key=lambda k: dept_stats[k]["health_score"], reverse=True)
+            best_branch = ranked[0] if ranked else "N/A"
+            worst_branch = ranked[-1] if ranked else "N/A"
 
             data = {
-                "total_students": analytics_data["total_students"],
-                "risk_counts": analytics_data["overall_risk_counts"],
+                "total_students": total_students,
+                "risk_counts": overall_risk_counts,
                 "dept_stats": dept_stats,
                 "worst_branch": worst_branch,
                 "best_branch": best_branch

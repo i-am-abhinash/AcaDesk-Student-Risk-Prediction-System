@@ -11,8 +11,7 @@ pyinstaller --noconsole --onefile ^
 --add-data "ui;ui" ^
 --add-data "logic;logic" ^
 --add-data "icon.ico;." ^
---add-data "logo.png;." ^
---add-data "logo1.png;." ^
+--add-data "AcaDesk (2).png;." ^
 --add-data "venv\Lib\site-packages\customtkinter;customtkinter/" ^
 --icon="icon.ico" ^
 --hidden-import "pyodbc" ^

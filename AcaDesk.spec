@@ -5,7 +5,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('ui', 'ui'), ('logic', 'logic'), ('icon.ico', '.'), ('logo.png', '.'), ('logo1.png', '.'), ('venv/Lib/site-packages/customtkinter', 'customtkinter/'), ('venv/Lib/site-packages/darkdetect', 'darkdetect/')],
+    datas=[('ui', 'ui'), ('logic', 'logic'), ('icon.ico', '.'), ('AcaDesk (2).png', '.'), ('venv/Lib/site-packages/customtkinter', 'customtkinter/'), ('venv/Lib/site-packages/darkdetect', 'darkdetect/')],
     hiddenimports=['darkdetect', 'pyodbc', 'psycopg2', 'oracledb'],
     hookspath=[],
     hooksconfig={},

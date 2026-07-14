@@ -1,7 +1,11 @@
+import atexit
 import customtkinter as ctk
 from tkinter import messagebox
 import os
 import sys
+import warnings
+
+warnings.simplefilter("ignore", ResourceWarning)
 
 # Ensure we can find the ui folder
 def resource_path(relative_path):
@@ -20,6 +24,8 @@ sys.path.append(current_dir)
 from ui.dashboard import DashboardScreen, ModernMessagebox
 from ui.login import LoginScreen, RegisterScreen
 from ui.erp_wizard import ERPWizard
+from ui.loading import LoadingScreen
+from logic import session_cache
 
 # --- CONFIG & STYLES ---
 ctk.set_appearance_mode("Dark")
@@ -88,13 +94,26 @@ class RiskAnalysisApp(ctk.CTk):
         tk.Tk.report_callback_exception(self, exc, val, tb)
 
     def on_closing(self):
-        self.destroy()
+        try:
+            session_cache.destroy()
+        except Exception:
+            pass
+        try:
+            self.destroy()
+        except Exception:
+            pass
+        import os
+        os._exit(0)
 
     def __init__(self):
         super().__init__()
         self.title("AcaDesk - Student Risk Analysis System")
         self.geometry("1100x700")
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
+        import atexit
+        atexit.register(session_cache.destroy)
+
         try:
             import os
             import ctypes
@@ -127,6 +146,7 @@ class RiskAnalysisApp(ctk.CTk):
             
             AnalyticsDBHandler().initialize_tables()
             CentralAuth().initialize_tables()
+            
         except Exception as e:
             print("Background DB Initialization Failed:", e)
 
@@ -134,7 +154,7 @@ class RiskAnalysisApp(ctk.CTk):
         self.container.pack(side="top", fill="both", expand=True)
 
         self.frames = {}
-        for F in (WelcomeScreen, RegisterScreen, DashboardScreen, LoginScreen):
+        for F in (WelcomeScreen, RegisterScreen, DashboardScreen, LoginScreen, LoadingScreen):
             page_name = F.__name__
             frame = F(parent=self.container, controller=self)
             self.frames[page_name] = frame
@@ -219,7 +239,7 @@ class WelcomeScreen(ctk.CTkFrame):
         try:
             from PIL import Image
             import os
-            logo_path = resource_path("logo1.png")
+            logo_path = resource_path("AcaDesk (2).png")
             img = Image.open(logo_path)
             ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(280, 280))
             self.logo_lbl = ctk.CTkLabel(left_frame, text="", image=ctk_img)
@@ -347,7 +367,8 @@ class WelcomeScreen(ctk.CTkFrame):
                         self.controller.show_frame("ERPWizard")
                         return
                     
-                    self.controller.show_frame("DashboardScreen")
+                    # All checks passed — go to Loading Screen which will sync cache
+                    self.controller.show_frame("LoadingScreen")
                 else:
                     if user['role'] == "Faculty" or user['role'] == "HOD":
                         ModernMessagebox("System Locked", "System setup has not yet been completed by the Administrator.", "error")

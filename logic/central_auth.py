@@ -2,6 +2,9 @@ import mysql.connector
 from logic.encryption import hash_password, verify_password, encrypt_text, decrypt_text
 from logic.central_db_handler import CentralDBHandler
 from logic.config_manager import load_config
+from logic.logger import get_logger
+
+_log = get_logger(__name__)
 
 class CentralAuth:
     def __init__(self):
@@ -19,12 +22,12 @@ class CentralAuth:
                 host=self.host, user=self.user, password=self.password, port=self.port, connect_timeout=5
             )
         except Exception as e:
-            print(f"Exception caught: {e}")
+            _log.error(f"Central server connection failed: {type(e).__name__}")
             return None
 
     def _get_conn(self):
         if not self.password:
-            print(f"❌ Auth Critical: No password for user '{self.user}' on {self.host}")
+            _log.error("Central DB: No password configured. Check db_config.json or env vars.")
             return None
         try:
             return mysql.connector.connect(
@@ -36,10 +39,10 @@ class CentralAuth:
                 connect_timeout=5
             )
         except mysql.connector.Error as err:
-            print(f"❌ Auth Connection Error: {err.msg}")
+            _log.error(f"Central DB connection error (code {err.errno}): {err.msg}")
             return None
         except Exception as e:
-            print(f"❌ Auth Unexpected Error: {e}")
+            _log.error(f"Central DB unexpected connection error: {type(e).__name__}")
             return None
 
     def initialize_tables(self):
@@ -50,7 +53,7 @@ class CentralAuth:
                 sc.execute(f"CREATE DATABASE IF NOT EXISTS {self.database}")
                 server_conn.commit()
             except Exception as e:
-                print(f"Exception caught: {e}")
+                _log.warning(f"Could not create database {self.database}: {e}")
                 pass
             finally: server_conn.close()
 
@@ -97,6 +100,7 @@ class CentralAuth:
                 db_name VARCHAR(100),
                 db_user VARCHAR(100),
                 encrypted_pass VARCHAR(500),
+                strategy VARCHAR(20) DEFAULT 'ADAPTER',
                 tbl_student VARCHAR(100),
                 tbl_academic VARCHAR(100),
                 tbl_branch VARCHAR(100),
@@ -118,8 +122,20 @@ class CentralAuth:
                 col_cons_abs VARCHAR(100),
                 col_leave_freq VARCHAR(100),
                 col_parent_phone VARCHAR(100),
-                col_parent_email VARCHAR(100)
+                col_parent_email VARCHAR(100),
+                col_assign_marks VARCHAR(100),
+                discovery_timestamp DATETIME,
+                mapping_extensions_json TEXT,
+                extended_features_json TEXT
             )""")
+            
+            # Apply ALTER TABLE for backwards compatibility with existing databases
+            try:
+                cursor.execute("ALTER TABLE erp_configs ADD COLUMN mapping_extensions_json TEXT")
+            except Exception: pass
+            try:
+                cursor.execute("ALTER TABLE erp_configs ADD COLUMN extended_features_json TEXT")
+            except Exception: pass
             
             cursor.execute("""CREATE TABLE IF NOT EXISTS interventions (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -145,10 +161,13 @@ class CentralAuth:
             
             cursor.execute("""CREATE TABLE IF NOT EXISTS faculty_notes (
                 id INT AUTO_INCREMENT PRIMARY KEY,
-                faculty_id VARCHAR(100),
                 student_id VARCHAR(100),
-                note TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                faculty_username VARCHAR(100),
+                department VARCHAR(100),
+                note_text TEXT,
+                note_status VARCHAR(50) DEFAULT 'ACTIVE',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
             )""")
             
             cursor.execute("""CREATE TABLE IF NOT EXISTS note_history (
@@ -208,9 +227,23 @@ class CentralAuth:
             )""")
             
             conn.commit()
+            # Add new columns to existing installations safely
+            new_cols = [
+                ("strategy",            "VARCHAR(20) DEFAULT 'ADAPTER'"),
+                ("col_assign_marks",     "VARCHAR(100)"),
+                ("discovery_timestamp", "DATETIME"),
+            ]
+            for col_name, col_def in new_cols:
+                try:
+                    cursor.execute(
+                        f"ALTER TABLE erp_configs ADD COLUMN {col_name} {col_def}"
+                    )
+                    conn.commit()
+                except Exception:
+                    pass  # Column already exists
             return True
         except Exception as e:
-            print("Auth Table Init Error:", e)
+            _log.error(f"Auth Table Init Error: {e}")
             return False
         finally:
             conn.close()
@@ -249,7 +282,7 @@ class CentralAuth:
             count = cursor.fetchone()[0]
             return count > 0
         except Exception as e:
-            print(f"Exception caught: {e}")
+            _log.warning(f"check_admin_exists error: {e}")
             return False
         finally:
             if conn: conn.close()
@@ -303,7 +336,7 @@ class CentralAuth:
             cursor.execute("SELECT username, assigned_branch FROM faculty_accounts WHERE college_name=%s", (college_name,))
             return cursor.fetchall()
         except Exception as e:
-            print(f"Exception caught: {e}")
+            _log.warning(f"get_faculty_list error: {e}")
             return []
         finally:
             if conn: conn.close()
@@ -350,7 +383,7 @@ class CentralAuth:
             cursor.execute("SELECT username, assigned_department, email FROM hod_accounts WHERE college_name=%s", (college_name,))
             return cursor.fetchall()
         except Exception as e:
-            print(f"Exception caught: {e}")
+            _log.warning(f"get_hod_list error: {e}")
             return []
         finally:
             if conn: conn.close()
@@ -365,7 +398,7 @@ class CentralAuth:
             CentralDBHandler().log_audit("System", "HOD Removed", f"Revoked HOD {username}")
             return True
         except Exception as e:
-            print(f"Exception caught: {e}")
+            _log.warning(f"revoke_hod error: {e}")
             return False
         finally:
             if conn: conn.close()
@@ -380,7 +413,7 @@ class CentralAuth:
             CentralDBHandler().log_audit("System", "Faculty Removed", f"Revoked faculty {username}")
             return True
         except Exception as e:
-            print(f"Exception caught: {e}")
+            _log.warning(f"revoke_faculty error: {e}")
             return False
         finally:
             if conn: conn.close()
@@ -437,13 +470,34 @@ class CentralAuth:
                     "user": erp['db_user'], "password": decrypt_text(erp['encrypted_pass']),
                     "database": erp['db_name']
                 }
-                # Load mapping
+                # Load mapping — include tbl_/col_ prefixed keys AND 'strategy'
+                _EXTRA_KEYS = {'strategy', 'discovery_timestamp'}
                 for k, v in erp.items():
-                    if k.startswith('tbl_') or k.startswith('col_'):
+                    if (k.startswith('tbl_') or k.startswith('col_') or k in _EXTRA_KEYS):
                         if v is not None:
                             config[k] = v
+                
+                import json
+                if erp.get('mapping_extensions_json'):
+                    try:
+                        config['mapping_extensions'] = json.loads(erp['mapping_extensions_json'])
+                    except Exception:
+                        config['mapping_extensions'] = {}
+                else:
+                    config['mapping_extensions'] = {}
+                    
+                if erp.get('extended_features_json'):
+                    try:
+                        config['extended_features'] = json.loads(erp['extended_features_json'])
+                    except Exception:
+                        config['extended_features'] = []
+                else:
+                    config['extended_features'] = []
                             
             return {"user": user, "erp_config": config}, "Success"
+        except Exception as e:
+            _log.error(f"login error: {e}")
+            return None, str(e)
         finally:
             conn.close()
 
@@ -498,18 +552,51 @@ class CentralAuth:
             ))
             
             if mapping:
+                import json
+                # Handle extended_features_json specially
+                if 'extended_features' in mapping:
+                    try:
+                        ext_json = json.dumps(mapping['extended_features'])
+                        up_sql = "UPDATE erp_configs SET extended_features_json=%s WHERE college_name=%s"
+                        cursor.execute(up_sql, (ext_json, college))
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).error(f"save_erp_config: failed saving extended_features: {e}")
+                
+                # Handle mapping_extensions_json
+                if 'mapping_extensions' in mapping:
+                    try:
+                        ext_map_json = json.dumps(mapping['mapping_extensions'])
+                        up_sql = "UPDATE erp_configs SET mapping_extensions_json=%s WHERE college_name=%s"
+                        cursor.execute(up_sql, (ext_map_json, college))
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).error(f"save_erp_config: failed saving mapping_extensions: {e}")
+
+                # Save strategy flag and all flat column/table mappings
                 for k, v in mapping.items():
-                    if k.startswith('tbl_') or k.startswith('col_'):
-                        up_sql = f"UPDATE erp_configs SET {k}=%s WHERE college_name=%s"
-                        cursor.execute(up_sql, (v, college))
+                    if k == 'strategy' or k.startswith('tbl_') or k.startswith('col_'):
+                        # Skip dictionaries as flat strings cannot hold them
+                        if isinstance(v, dict): continue
+                        try:
+                            up_sql = f"UPDATE erp_configs SET {k}=%s WHERE college_name=%s"
+                            cursor.execute(up_sql, (v, college))
+                        except Exception as col_err:
+                            # Column may not exist yet on existing installations
+                            import logging
+                            logging.getLogger(__name__).debug(
+                                f"save_erp_config: skipping field {k}: {col_err}"
+                            )
 
             conn.commit()
             return True
         except Exception as e:
-            print("SAVE ERP CONFIG ERROR:", e)
+            import logging
+            logging.getLogger(__name__).error(f"save_erp_config error: {e}")
             return False
         finally:
             conn.close()
+
 
     def check_email_sent(self, college_name, student_id, alert_type, semester):
         conn = self._get_conn()
@@ -520,7 +607,7 @@ class CentralAuth:
                            (college_name, student_id, alert_type, semester))
             return cursor.fetchone() is not None
         except Exception as e:
-            print("check_email_sent error:", e)
+            _log.warning(f"check_email_sent error: {e}")
             return False
         finally:
             conn.close()
@@ -535,7 +622,7 @@ class CentralAuth:
             conn.commit()
             return True
         except Exception as e:
-            print("log_email_sent error:", e)
+            _log.warning(f"log_email_sent error: {e}")
             return False
         finally:
             conn.close()
@@ -563,11 +650,11 @@ class CentralAuth:
                 }]
                 cache.bulk_insert("faculty_notes", note_data)
             except Exception as ce:
-                print(f"Cache write-through error: {ce}")
+                _log.debug(f"Cache write-through (non-critical): {ce}")
                 
             return True
         except Exception as e:
-            print("save_faculty_note error:", e)
+            _log.warning(f"save_faculty_note error: {e}")
             return False
         finally:
             conn.close()
@@ -589,7 +676,7 @@ class CentralAuth:
             cursor.execute("SELECT * FROM faculty_notes WHERE student_id=%s ORDER BY created_at DESC", (student_id,))
             return cursor.fetchall()
         except Exception as e:
-            print(f"Exception caught: {e}")
+            _log.warning(f"get_notes_for_student error: {e}")
             return []
         finally:
             if conn: conn.close()
@@ -641,8 +728,8 @@ class CentralAuth:
                 
             results = cursor.fetchall()
             return {r['student_id']: r for r in results}
-        except Exception as e: 
-            print("get_student_note_stats error:", e)
+        except Exception as e:
+            _log.warning(f"get_student_note_stats error: {e}")
             return {}
         finally:
             conn.close()
@@ -655,7 +742,7 @@ class CentralAuth:
             cursor.execute("SELECT * FROM faculty_notes ORDER BY created_at DESC")
             return cursor.fetchall()
         except Exception as e:
-            print(f"Exception caught: {e}")
+            _log.warning(f"get_all_notes error: {e}")
             return []
         finally:
             if conn: conn.close()
@@ -668,7 +755,7 @@ class CentralAuth:
             cursor.execute("SELECT * FROM faculty_notes WHERE department=%s ORDER BY created_at DESC", (department,))
             return cursor.fetchall()
         except Exception as e:
-            print(f"Exception caught: {e}")
+            _log.warning(f"get_notes_by_department error: {e}")
             return []
         finally:
             if conn: conn.close()
@@ -682,7 +769,7 @@ class CentralAuth:
             conn.commit()
             return True
         except Exception as e:
-            print(f"Exception caught: {e}")
+            _log.warning(f"update_faculty_note error: {e}")
             return False
         finally:
             conn.close()
@@ -696,7 +783,32 @@ class CentralAuth:
             conn.commit()
             return True
         except Exception as e:
-            print(f"Exception caught: {e}")
+            _log.warning(f"delete_faculty_note error: {e}")
+            return False
+        finally:
+            conn.close()
+
+    def update_erp_mapping_field(self, college_name: str, field_key: str, new_value: str) -> bool:
+        """
+        Persists a single corrected column name back to erp_configs.
+        Called by SyncWorker when validate_stored_mapping() auto-discovers
+        a renamed column, so the correction survives future sessions.
+        """
+        conn = self._get_conn()
+        if not conn:
+            return False
+        try:
+            cursor = conn.cursor()
+            sql = f"UPDATE erp_configs SET {field_key} = %s WHERE college_name = %s"
+            cursor.execute(sql, (new_value, college_name))
+            conn.commit()
+            _log.info(
+                f"update_erp_mapping_field: Persisted '{field_key}' = '{new_value}' "
+                f"for college '{college_name}'"
+            )
+            return cursor.rowcount > 0
+        except Exception as e:
+            _log.error(f"update_erp_mapping_field error: {e}")
             return False
         finally:
             conn.close()

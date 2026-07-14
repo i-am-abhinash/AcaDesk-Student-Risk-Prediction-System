@@ -12,11 +12,14 @@ class TrendVisuals:
         history = trend_info.get("history", [])
         if not history:
             return None
-            
-        semesters = [str(h.get('semester')) for h in history]
+        # Support both 'semester' and 'semester_number' keys    
+        semesters = [f"Sem {h.get('semester_number', h.get('semester', i+1))}" for i, h in enumerate(history)]
+        if semesters:
+            semesters[-1] = "Current"
         cgpas = [float(h.get('cgpa', 0)) for h in history]
-        atts = [float(h.get('attendance', 0)) for h in history]
-        bkls = [float(h.get('backlogs', 0)) for h in history]
+        atts = [float(h.get('attendance', h.get('attendance_that_semester', 0))) for h in history]
+        bkls = [float(h.get('backlogs', h.get('backlogs_that_semester', 0))) for h in history]
+
         
         # Dark theme configuration
         plt.style.use('dark_background')

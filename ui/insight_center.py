@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import sys
 import os
+import threading
 
 # --- PATH SETUP ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -11,7 +12,7 @@ if root_dir not in sys.path:
     sys.path.append(root_dir)
 
 from ui.styles import COLORS, FONTS, DIMS
-from logic.risk_engine import AdvancedRiskPredictor
+from logic.insight_service import InsightService
 from logic.db_handler import DBHandler
 from logic.central_auth import CentralAuth
 from logic.intervention_engine import InterventionEngine
@@ -20,7 +21,7 @@ class InsightCenter(ctk.CTkFrame):
     def __init__(self, parent, controller):
         super().__init__(parent, corner_radius=0, fg_color=COLORS["bg"])
         self.controller = controller
-        self.predictor = AdvancedRiskPredictor()
+        self.insight_service = InsightService()
         self.db = None
         
         self.slider_vars = {}
@@ -28,6 +29,8 @@ class InsightCenter(ctk.CTkFrame):
         self.value_labels = {}
         self.student_data = {}
         self.ignore_updates = False
+        self._debounce_id = None      # Phase 6: debounce handle for slider events
+        self._prediction_running = False  # Phase 6: guard against concurrent predictions
         
         self.scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
         self.scroll.pack(fill="both", expand=True, padx=25, pady=20)
@@ -206,13 +209,42 @@ class InsightCenter(ctk.CTkFrame):
         self.gauge_canvas.create_oval(marker_x-6, y_pos-6, marker_x+6, y_pos+6, fill=color, outline="white")
 
     def on_slider_event(self, *args):
-        if self.ignore_updates: return
-        self.run_prediction()
+        """Debounced slider handler — waits 300 ms before running prediction."""
+        if self.ignore_updates:
+            return
+        # Cancel any previously scheduled call
+        if self._debounce_id is not None:
+            try:
+                self.after_cancel(self._debounce_id)
+            except Exception:
+                pass
+        self._debounce_id = self.after(300, self._run_prediction_async)
+
+    def _run_prediction_async(self):
+        """Launch run_prediction on a background thread to avoid UI freeze."""
+        if self._prediction_running:
+            return
+        self._prediction_running = True
+        threading.Thread(target=self._prediction_worker, daemon=True).start()
+
+    def _prediction_worker(self):
+        """Background worker — runs prediction then marshals UI update to main thread."""
+        try:
+            data = {k: var.get() for k, var in self.slider_vars.items()}
+            report = self.insight_service.get_simulation_report(data, year="2nd Year")
+            self.after(0, self.run_prediction_ui, data, report)
+        except Exception as e:
+            from logic.logger import get_logger
+            get_logger(__name__).error(f"Prediction worker error: {e}")
+        finally:
+            self._prediction_running = False
 
     def run_prediction(self):
-        data = {k: var.get() for k, var in self.slider_vars.items()}
-        report = self.predictor.analyze(data, year="2nd Year")
-        
+        """Synchronous entry-point (called on_show and after student load)."""
+        self._run_prediction_async()
+
+    def run_prediction_ui(self, data, report):
+        """Update all UI elements from a completed prediction report (main thread only)."""
         score = report.get("score", 0.0)
         level = report.get("level", "Low")
         conf = report.get("confidence", 92)
@@ -331,11 +363,11 @@ class InsightCenter(ctk.CTkFrame):
         
         sc1_data = data.copy()
         sc1_data["attendance_pct"] = max(sc1_data.get("attendance_pct", 0), 85.0)
-        sc1_score = self.predictor.analyze(sc1_data, year="2nd Year").get("score", 0.0)
+        sc1_score = self.insight_service.get_simulation_report(sc1_data, year="2nd Year").get("score", 0.0)
         
         sc2_data = data.copy()
         sc2_data["backlog_count"] = 0.0
-        sc2_score = self.predictor.analyze(sc2_data, year="2nd Year").get("score", 0.0)
+        sc2_score = self.insight_service.get_simulation_report(sc2_data, year="2nd Year").get("score", 0.0)
         
         forecasts = []
         if data.get("attendance_pct", 0) < 85:
@@ -485,7 +517,7 @@ class InsightCenter(ctk.CTkFrame):
                             print(f"Exception caught: {e}")
                             pass
             
-            base_report = self.predictor.analyze(target, year="2nd Year")
+            base_report = self.insight_service.get_simulation_report(target, year="2nd Year")
             score = base_report.get("score", 0.0)
             self.student_data["base_score"] = score
             
@@ -518,7 +550,7 @@ class RiskIntelligenceDashboard(ctk.CTkFrame):
     def __init__(self, parent, controller, student_data=None):
         super().__init__(parent, fg_color="#0a0a0a")
         self.controller = controller
-        self.predictor = AdvancedRiskPredictor()
+        self.insight_service = InsightService()
         self.raw_data = student_data
         self.db = DBHandler(self.controller.shared_data.get("erp_config")) if self.controller.shared_data.get("erp_config") else None
         
@@ -534,11 +566,44 @@ class RiskIntelligenceDashboard(ctk.CTkFrame):
             self.refresh(student_data)
 
     def refresh(self, data):
-        # Clear previous elements
+        # Clear previous elements immediately
         for widget in self.scroll.winfo_children():
             widget.destroy()
+            
+        loading_lbl = ctk.CTkLabel(self.scroll, text="Analyzing Risk Profile & Fetching History... Please Wait.", font=FONTS["h3"], text_color=COLORS["accent"])
+        loading_lbl.pack(pady=50)
+        
+        import threading
+        threading.Thread(target=self._refresh_worker, args=(data, loading_lbl), daemon=True).start()
 
-        report = self.predictor.analyze(data)
+    def _refresh_worker(self, data, loading_lbl):
+        try:
+            report = self.insight_service.get_simulation_report(data)
+            
+            student_id = data.get('id', data.get('student_id', ''))
+            college_name = self.controller.shared_data.get("college_name", "")
+            
+            from logic.central_auth import CentralAuth
+            from logic.intervention_engine import InterventionEngine
+            
+            ca = CentralAuth()
+            ie = InterventionEngine()
+            
+            raw_notes = ca.get_notes_for_student(student_id)
+            raw_interventions = ie.get_database_interventions(college_name, student_id)
+            
+            self.after(0, self._refresh_ui, data, report, raw_notes, raw_interventions, loading_lbl)
+        except Exception as e:
+            from logic.logger import get_logger
+            get_logger(__name__).error(f"Dashboard refresh worker error: {e}")
+            self.after(0, lambda: loading_lbl.configure(text="Error loading insights. Check logs.", text_color="red"))
+
+    def _refresh_ui(self, data, report, raw_notes, raw_interventions, loading_lbl):
+        try:
+            loading_lbl.destroy()
+        except Exception:
+            pass
+
         lvl = report.get('level', 'Low')
         score_val = report.get('score', 0.0)
         conf = report.get('confidence', 90)
@@ -663,14 +728,8 @@ class RiskIntelligenceDashboard(ctk.CTkFrame):
         ctk.CTkLabel(timeline_card, text="📅 STUDENT ACTIVITY TIMELINE", font=FONTS["body"], text_color="#888").pack(anchor="w", padx=15, pady=(10, 5))
         
         # Dynamic Timeline Rendering (Interventions + Notes)
+        # (Data already fetched in background worker)
         student_id = data.get('id', data.get('student_id', ''))
-        college_name = self.controller.shared_data.get("college_name", "")
-        
-        ca = CentralAuth()
-        ie = InterventionEngine()
-        
-        raw_notes = ca.get_notes_for_student(student_id)
-        raw_interventions = ie.get_database_interventions(college_name, student_id)
         
         timeline_events = []
         for n in raw_notes:
@@ -737,8 +796,7 @@ class RiskIntelligenceDashboard(ctk.CTkFrame):
         
         def load_history():
             for w in history_frame.winfo_children(): w.destroy()
-            from logic.central_auth import CentralAuth
-            notes = CentralAuth().get_notes_for_student(student_id)
+            notes = raw_notes
             if not notes:
                 ctk.CTkLabel(history_frame, text="No previous notes for this student.", text_color="#555", font=FONTS["caption"]).pack(pady=10)
                 return
@@ -880,13 +938,13 @@ class RiskIntelligenceDashboard(ctk.CTkFrame):
         # Attendance Intervention Simulation
         sc1_data = data.copy()
         sc1_data["attendance_pct"] = max(sc1_data.get("attendance_pct", 0), 85.0)
-        sc1_report = self.predictor.analyze(sc1_data, year="2nd Year")
+        sc1_report = self.insight_service.get_simulation_report(sc1_data, year="2nd Year")
         sc1_score = sc1_report.get("score", 0.0)
         
         # Backlog Intervention Simulation
         sc2_data = data.copy()
         sc2_data["backlog_count"] = 0.0
-        sc2_report = self.predictor.analyze(sc2_data, year="2nd Year")
+        sc2_report = self.insight_service.get_simulation_report(sc2_data, year="2nd Year")
         sc2_score = sc2_report.get("score", 0.0)
 
         forecasts = [
