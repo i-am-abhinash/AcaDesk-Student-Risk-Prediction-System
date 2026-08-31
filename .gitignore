@@ -17,3 +17,4 @@ secret.key
 db_config.json
 *.log
 acadesk.log
+*.mp4

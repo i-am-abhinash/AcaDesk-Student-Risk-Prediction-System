@@ -283,6 +283,12 @@ class LoadingScreen(ctk.CTkFrame):
             self._show_error("No ERP configuration found. Please complete the ERP setup wizard.")
             return
 
+        if not erp_config.get("mapping_confirmed_by_human"):
+            _log.info("Mapping not confirmed by human. Redirecting to ERP Setup Wizard.")
+            self._stop_spinner()
+            self.controller.show_frame("ERPWizard")
+            return
+
         from logic.sync_worker import SyncWorker
         worker = SyncWorker(erp_config, self.controller.shared_data)
 

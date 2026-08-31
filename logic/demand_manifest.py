@@ -363,22 +363,17 @@ ACADEMIC_RECORDS_FIELDS: List[FieldSpec] = [
     ),
     FieldSpec(
         purpose="consecutive_absences",
-        synonyms=[
-            "consecutive_absences", "consec_absences",
-            "continuous_absent", "consecutive_absent_days",
-            "streak_absent", "cont_absence",
-        ],
+        synonyms=[],
         requirement_level="SUPPLEMENTARY",
         score_weight=2,
+        field_type="COMPUTED_BEHAVIORAL",
     ),
     FieldSpec(
         purpose="leave_frequency",
-        synonyms=[
-            "leave_frequency", "leave_count", "leaves_taken",
-            "total_leaves", "leave_days", "leaves",
-        ],
+        synonyms=[],
         requirement_level="SUPPLEMENTARY",
         score_weight=2,
+        field_type="COMPUTED_BEHAVIORAL",
     ),
     FieldSpec(
         purpose="tenth_percentage",

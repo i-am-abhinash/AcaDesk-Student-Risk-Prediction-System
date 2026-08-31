@@ -1,4 +1,5 @@
 # ui/styles.py
+import customtkinter as ctk
 
 # --- COLOR PALETTE ---
 COLORS = {
@@ -32,3 +33,86 @@ DIMS = {
     "card_height": 60,
     "btn_height": 42,
 }
+
+class ModernMessagebox(ctk.CTkToplevel):
+    def __init__(self, title, message, icon="info"):
+        super().__init__()
+        
+        self.title("AcaDesk")
+        
+        width = 450
+        height = 280
+        screen_w = self.winfo_screenwidth()
+        screen_h = self.winfo_screenheight()
+        
+        pos_x = (screen_w - width) // 2
+        pos_y = (screen_h - height) // 2
+        
+        self.geometry(f"{width}x{height}+{pos_x}+{pos_y}")
+        self.resizable(False, False)
+        self.attributes("-topmost", True)
+        self.configure(fg_color=COLORS["card"])
+        
+        if icon == "error":
+            color = COLORS["danger"]
+            symbol = "❌"
+        elif icon == "success":
+            color = COLORS["success"]
+            symbol = "✅"
+        else:
+            color = COLORS["accent"]
+            symbol = "ℹ️"
+
+        # Top accent bar
+        header_bar = ctk.CTkFrame(self, fg_color=color, height=8)
+        header_bar.pack(fill="x", side="top")
+        
+        # Title Label
+        title_lbl = ctk.CTkLabel(
+            self, 
+            text=f"{symbol}  {title.upper()}", 
+            font=FONTS["h3"], 
+            text_color=color
+        )
+        title_lbl.pack(pady=(25, 10))
+        
+        # Message Label
+        msg_lbl = ctk.CTkLabel(
+            self, 
+            text=message, 
+            font=FONTS["body"], 
+            text_color="#E0E0E0", 
+            wraplength=400, 
+            justify="center"
+        )
+        msg_lbl.pack(pady=10, padx=20)
+        
+        # Close Button
+        ok_btn = ctk.CTkButton(
+            self, 
+            text="OK", 
+            width=120, 
+            height=35, 
+            fg_color=color, 
+            text_color="black", 
+            font=FONTS["body"], 
+            command=self.destroy
+        )
+        ok_btn.pack(pady=20, side="bottom")
+        
+        self.grab_set()
+
+class BranchTranslator:
+    def __init__(self, db_handler):
+        self.map = {}
+        if db_handler:
+            self.map = db_handler.get_branch_map()
+            
+    def get_name(self, branch_id):
+        bid_str = str(branch_id).strip()
+        return self.map.get(bid_str, f"Dept {branch_id}")
+
+# ====================================================
+#  SIDEBAR
+# ====================================================
+

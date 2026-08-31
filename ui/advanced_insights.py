@@ -19,7 +19,7 @@ class AdvancedInsightsPanel(ctk.CTkFrame):
         # Header
         self.header = ctk.CTkFrame(self, fg_color="#12141E", corner_radius=12, border_width=1, border_color="#2A2E3F")
         self.header.pack(fill="x", padx=20, pady=(20, 10))
-        ctk.CTkLabel(self.header, text="✨ AI Model Evaluation Dashboard", font=("Outfit", 24, "bold"), text_color="#00E5FF").pack(side="left", padx=20, pady=15)
+        ctk.CTkLabel(self.header, text="✨ AI Insights & What-If Analysis", font=("Outfit", 24, "bold"), text_color="#00E5FF").pack(side="left", padx=20, pady=15)
         
         # Main content area
         self.scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
@@ -196,7 +196,7 @@ class AdvancedInsightsPanel(ctk.CTkFrame):
         }
         
         def trigger_calc(*args):
-            from logic.risk_engine import AdvancedRiskPredictor
+            from logic.prediction_service import PredictionService
             features = {
                 "attendance": vars_dict["attendance"].get(),
                 "cgpa": vars_dict["cgpa"].get() / 10.0,
@@ -210,7 +210,7 @@ class AdvancedInsightsPanel(ctk.CTkFrame):
                 "leave_frequency": vars_dict["leave_frequency"].get(),
                 "year": "2"
             }
-            res = AdvancedRiskPredictor().analyze(features)
+            res = PredictionService().analyze(features)
             
             level = res['level']
             if level == "High":

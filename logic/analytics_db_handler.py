@@ -1,6 +1,8 @@
 import mysql.connector
 from logic.config_manager import load_config
+from logic.logger import get_logger
 
+_log = get_logger(__name__)
 class AnalyticsDBHandler:
     def __init__(self):
         cfg = load_config().get("analytics", {})
@@ -12,7 +14,7 @@ class AnalyticsDBHandler:
 
     def _get_server_connection(self):
         if not self.password:
-            print(f"❌ Critical: No password provided for user '{self.user}' on {self.host}")
+            _log.warning(f"Warning: Connecting to {self.host} with user '{self.user}' without a password.")
             return None
         try:
             return mysql.connector.connect(
@@ -31,7 +33,7 @@ class AnalyticsDBHandler:
 
     def _get_connection(self):
         if not self.password:
-            print(f"❌ Critical: No password provided for user '{self.user}' on {self.host}")
+            _log.warning(f"Warning: Connecting to {self.host} with user '{self.user}' without a password.")
             return None
         try:
             return mysql.connector.connect(

@@ -72,7 +72,14 @@ def train_model():
     
     model_path = os.path.join(os.path.dirname(__file__), '..', 'synapse_model.pkl')
     joblib.dump(model, model_path)
+    
+    # Save the expected feature names for the dynamic schema mapper
+    features_path = os.path.join(os.path.dirname(__file__), '..', 'synapse_model.features.json')
+    with open(features_path, 'w') as f:
+        json.dump(list(X.columns), f)
+        
     print(f"Saved highly advanced synapse_model.pkl to {model_path} successfully!")
+    print(f"Saved required features to {features_path} successfully!")
 
 if __name__ == "__main__":
     train_model()

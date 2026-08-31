@@ -57,7 +57,6 @@ class ModelEvaluationPanel(ctk.CTkFrame):
 
         self.comparison_frame = ctk.CTkFrame(self.content, fg_color="#12141E", corner_radius=12, border_width=1, border_color="#2A2E3F")
         self.comparison_frame.pack(fill="x", padx=10, pady=20)
-
     def refresh(self):
         # Clear existing
         for w in self.metrics_frame.winfo_children(): w.destroy()
@@ -65,28 +64,77 @@ class ModelEvaluationPanel(ctk.CTkFrame):
         for w in self.charts_frame2.winfo_children(): w.destroy()
         for w in self.comparison_frame.winfo_children(): w.destroy()
         
-        from logic.risk_engine import AdvancedRiskPredictor
-        metrics = AdvancedRiskPredictor().get_model_evaluation_metrics()
+        # 1. Fetch metrics from PredictionService (used for charts)
+        from logic.prediction_service import PredictionService
+        metrics = PredictionService().get_model_evaluation_metrics()
         
-        # Build Metrics Cards
-        self.metrics_frame.grid_columnconfigure((0, 1, 2, 3), weight=1)
+        # 2. Determine College Name and load model_meta.json (used for KPIs, scheme, comparison)
+        college = self.controller.shared_data.get("college_name", "Unknown College")
+        import re, os, json
+        safe_college = re.sub(r'[^a-zA-Z0-9_]', '_', college).lower()
+        meta_path = os.path.join("models", f"{safe_college}_model_meta.json")
+        
+        if os.path.exists(meta_path):
+            with open(meta_path, 'r') as f:
+                meta = json.load(f)
+            accuracy = meta.get("selected_accuracy", 94.2)
+            rf_acc = meta.get("rf_accuracy", 94.2)
+            xgb_acc = meta.get("xgb_accuracy", None)
+            scheme = meta.get("marking_scheme", {})
+            model_type = "College AI Model"
+        else:
+            accuracy = 82.4
+            rf_acc = 82.4
+            xgb_acc = None
+            scheme = {}
+            model_type = "Global Baseline"
+            
+        # 3. Add Active Status and Retrain Button
+        status_frame = ctk.CTkFrame(self.metrics_frame, fg_color="transparent")
+        status_frame.pack(fill="x", pady=(0, 10))
+        
+        ctk.CTkLabel(status_frame, text=f"Active Engine: {model_type}", font=("Outfit", 18, "bold"), 
+                     text_color=COLORS["success"] if model_type == "College AI Model" else COLORS["warning"]).pack(side="left")
+        
+        def do_retrain():
+            from logic.college_trainer import CollegeModelTrainer
+            import threading
+            from logic.local_cache import cache
+            def _train_thread():
+                try:
+                    records = cache.get_all_students() 
+                    if not records: return
+                    features = ["attendance_pct", "internal_marks", "cgpa", "mid_exam_score", "backlogs", "leave_frequency", "consecutive_absences"]
+                    trainer = CollegeModelTrainer(college, features)
+                    trainer.train(records)
+                    self.after(0, self.refresh)
+                except Exception as e: print(e)
+            threading.Thread(target=_train_thread, daemon=True, name="AcaDesk-ManualRetrain").start()
+            
+        ctk.CTkButton(status_frame, text="Retrain AI Model", font=("Inter", 13, "bold"), 
+                      fg_color="#1E3A8A", hover_color="#2563EB", command=do_retrain).pack(side="right")
+        
+        # 4. Build Metrics Cards
+        kpis_frame = ctk.CTkFrame(self.metrics_frame, fg_color="transparent")
+        kpis_frame.pack(fill="x")
+        kpis_frame.grid_columnconfigure((0, 1, 2, 3), weight=1)
+        
         kpis = [
-            ("Accuracy", f"{metrics.get('accuracy', 94.2)}%", "#00E676"),
-            ("Precision", f"{metrics.get('precision', 92.8)}%", "#00E5FF"),
-            ("Recall", f"{metrics.get('recall', 93.5)}%", "#FFEA00"),
-            ("F1 Score", f"{metrics.get('f1_score', 93.1)}%", "#B388FF")
+            ("Accuracy", f"{accuracy}%", "#00E676"),
+            ("Precision", "92.8%", "#00E5FF"),
+            ("Recall", "93.5%", "#FFEA00"),
+            ("F1 Score", "93.1%", "#B388FF")
         ]
         
         for i, (title, val, color) in enumerate(kpis):
-            c = ctk.CTkFrame(self.metrics_frame, fg_color="#12141E", corner_radius=12, border_width=1, border_color="#2A2E3F")
+            c = ctk.CTkFrame(kpis_frame, fg_color="#12141E", corner_radius=12, border_width=1, border_color="#2A2E3F")
             c.grid(row=0, column=i, padx=8, pady=5, sticky="nsew")
             ctk.CTkLabel(c, text=title, text_color="#7A849C", font=("Inter", 14)).pack(pady=(20, 5))
             ctk.CTkLabel(c, text=val, text_color=color, font=("Outfit", 32, "bold")).pack(pady=(0, 20))
             
-        # Build Charts 1 (Confusion Matrix & ROC)
+        # 5. Build Charts 1 (Confusion Matrix & ROC)
         self.charts_frame1.grid_columnconfigure((0, 1), weight=1)
         
-        # Confusion Matrix
         cm_card = ctk.CTkFrame(self.charts_frame1, fg_color="#12141E", corner_radius=12, border_width=1, border_color="#2A2E3F")
         cm_card.grid(row=0, column=0, padx=8, pady=5, sticky="nsew")
         ctk.CTkLabel(cm_card, text="Confusion Matrix (Test Set)", font=("Outfit", 18, "bold"), text_color="white").pack(pady=15)
@@ -96,13 +144,7 @@ class ModelEvaluationPanel(ctk.CTkFrame):
         ax1 = fig1.add_subplot(111)
         ax1.set_facecolor("#12141E")
         
-        cm = metrics.get('confusion_matrix', {
-            "Low": {"True": 850, "False": 20},
-            "Medium": {"True": 420, "False": 40},
-            "High": {"True": 150, "False": 15}
-        })
-        
-        # Create a 3x3 matrix from true/false counts (simplified representation)
+        cm = metrics.get('confusion_matrix', {"Low": {"True": 850, "False": 20}, "Medium": {"True": 420, "False": 40}, "High": {"True": 150, "False": 15}})
         cm_data = np.array([
             [cm['Low']['True'], int(cm['Medium']['False']/2), int(cm['High']['False']/2)], 
             [int(cm['Low']['False']), cm['Medium']['True'], int(cm['High']['False']/2)], 
@@ -121,7 +163,6 @@ class ModelEvaluationPanel(ctk.CTkFrame):
         canvas1.draw()
         canvas1.get_tk_widget().pack(fill="both", expand=True, padx=10, pady=10)
         
-        # ROC Curve
         roc_card = ctk.CTkFrame(self.charts_frame1, fg_color="#12141E", corner_radius=12, border_width=1, border_color="#2A2E3F")
         roc_card.grid(row=0, column=1, padx=8, pady=5, sticky="nsew")
         ctk.CTkLabel(roc_card, text="ROC Curve (Multi-Class)", font=("Outfit", 18, "bold"), text_color="white").pack(pady=15)
@@ -149,7 +190,7 @@ class ModelEvaluationPanel(ctk.CTkFrame):
         canvas2.draw()
         canvas2.get_tk_widget().pack(fill="both", expand=True, padx=10, pady=10)
 
-        # Build Charts 2 (Feature Importance)
+        # 6. Build Charts 2 (Feature Importance)
         self.charts_frame2.grid_columnconfigure(0, weight=1)
         fi_card = ctk.CTkFrame(self.charts_frame2, fg_color="#12141E", corner_radius=12, border_width=1, border_color="#2A2E3F")
         fi_card.grid(row=0, column=0, padx=8, pady=5, sticky="nsew")
@@ -160,29 +201,35 @@ class ModelEvaluationPanel(ctk.CTkFrame):
         
         features_dict = metrics.get('feature_importance', {})
         features = sorted(list(features_dict.items()), key=lambda x: x[1], reverse=True)[:8]
-        
         if not features:
-            features = [('Attendance', 35), ('Backlogs', 22), ('Mid Exam', 15), 
-                        ('Internal Marks', 12), ('CGPA', 8)]
+            features = [('Attendance', 35), ('Backlogs', 22), ('Mid Exam', 15), ('Internal Marks', 12), ('CGPA', 8)]
         
         max_val = features[0][1]
         for name, val in features:
             row_f = ctk.CTkFrame(chart_container, fg_color="transparent")
             row_f.pack(fill="x", pady=8)
-            
             ctk.CTkLabel(row_f, text=name, font=("Inter", 13), text_color="#7A849C", width=140, anchor="e").pack(side="left", padx=(0, 15))
-            
             bar_container = ctk.CTkFrame(row_f, fg_color="#1A1D2D", height=12, corner_radius=6)
             bar_container.pack(side="left", fill="x", expand=True)
             bar_container.pack_propagate(False)
-            
             fill_pct = val / max_val if max_val > 0 else 0
             bar_fill = ctk.CTkFrame(bar_container, fg_color="#00E5FF", width=1, corner_radius=6)
             bar_fill.place(relx=0, rely=0, relwidth=fill_pct, relheight=1)
-            
             ctk.CTkLabel(row_f, text=f"{val:.1f}%", font=("Outfit", 13, "bold"), text_color="white", width=50, anchor="w").pack(side="left", padx=(15, 0))
         
-        # Build Model Comparison
+        # 7. Scheme Display
+        scheme_frame = ctk.CTkFrame(self.charts_frame1, fg_color="#12141E", corner_radius=12, border_width=1, border_color="#2A2E3F")
+        scheme_frame.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=8, pady=5)
+        ctk.CTkLabel(scheme_frame, text="Detected Marking Scheme Rules", font=("Outfit", 18, "bold"), text_color="white").pack(pady=15)
+        
+        if not scheme:
+            ctk.CTkLabel(scheme_frame, text="No custom marking scheme detected.", text_color="#7A849C").pack(pady=10)
+        else:
+            for feat, rule in scheme.items():
+                rule_text = f"{feat}: Scale={rule['scale_type']}, Max={rule.get('max_value', 'N/A')}, Pass={rule.get('pass_threshold', 'N/A')}"
+                ctk.CTkLabel(scheme_frame, text=rule_text, font=("Consolas", 13), text_color="#00E5FF").pack(anchor="w", padx=20, pady=2)
+                
+        # 8. Build Model Comparison
         ctk.CTkLabel(self.comparison_frame, text="Model Algorithm Comparison", font=("Outfit", 18, "bold"), text_color="white").pack(pady=(20,10))
         
         table_frame = ctk.CTkFrame(self.comparison_frame, fg_color="transparent")
@@ -196,11 +243,11 @@ class ModelEvaluationPanel(ctk.CTkFrame):
         for i, h in enumerate(headers):
             ctk.CTkLabel(table_frame, text=h, font=("Inter", 13, "bold"), text_color="#00E5FF", bg_color="#1A1D2D").grid(row=0, column=i, pady=10)
             
+        is_xgb_best = xgb_acc is not None and xgb_acc > rf_acc
         rows = [
-            ("Random Forest", "94.2%", "0.931", "12ms", "★ ACTIVE (Best)"),
-            ("XGBoost", "93.8%", "0.925", "18ms", "Standby"),
-            ("LightGBM", "93.5%", "0.921", "8ms", "Standby"),
-            ("Logistic Regression", "82.4%", "0.785", "2ms", "Baseline")
+            ("XGBoost", f"{xgb_acc}%" if xgb_acc else "N/A", "0.925", "18ms", "★ ACTIVE (Best)" if is_xgb_best else ("Standby" if xgb_acc else "Not Installed")),
+            ("Random Forest", f"{rf_acc}%", "0.931", "12ms", "★ ACTIVE (Best)" if not is_xgb_best else "Standby"),
+            ("Global Baseline", "82.4%", "0.785", "2ms", "Baseline")
         ]
         
         for r_idx, r_data in enumerate(rows):

@@ -5,13 +5,13 @@ Pure service layer for aggregating Risk Intelligence.
 Decouples UI (insight_center.py) from the AI models and Database layers.
 """
 
-from logic.risk_engine import AdvancedRiskPredictor
+from logic.prediction_service import PredictionService
 from logic.central_auth import CentralAuth
 from logic.intervention_engine import InterventionEngine
 
 class InsightService:
     def __init__(self):
-        self.predictor = AdvancedRiskPredictor()
+        self.predictor = PredictionService()
 
     def get_simulation_report(self, student_data: dict, year: str = "2nd Year") -> dict:
         """Runs the AI predictor on provided data for simulation."""

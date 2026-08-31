@@ -294,12 +294,32 @@ class SchemaDetector:
             # PHASE 2 — TARGETED DATA RETRIEVAL MAPPING
             # ────────────────────────────────────────────────────────
             
-            # STEP 1: Score every table against every role
-            role_scores = {r: [] for r in ALL_ROLES.keys()}
+            # STEP 1: Filter roles based on model manifest
+            from logic.model_manifest import get_model_required_features
+            model_features = get_model_required_features()
+            
+            filtered_roles = {}
+            for role_name, fields in ALL_ROLES.items():
+                if not model_features:
+                    filtered_roles[role_name] = fields
+                else:
+                    filtered_fields = []
+                    for f in fields:
+                        if f.requirement_level == "CRITICAL":
+                            filtered_fields.append(f)
+                        elif any(syn in model_features for syn in f.synonyms):
+                            filtered_fields.append(f)
+                        elif f.purpose in model_features:
+                            filtered_fields.append(f)
+                    if filtered_fields:
+                        filtered_roles[role_name] = filtered_fields
+                        
+            # Score every table against every filtered role
+            role_scores = {r: [] for r in filtered_roles.keys()}
             
             for tname, tdata in schema_graph["tables"].items():
                 lower_cols = set(tdata["columns"].keys())
-                for role_name, field_specs in ALL_ROLES.items():
+                for role_name, field_specs in filtered_roles.items():
                     score = 0
                     matched_cols = {}
                     for fspec in field_specs:
@@ -355,7 +375,7 @@ class SchemaDetector:
                                 for fk in schema_graph["tables"][best_tname]["foreign_keys"]:
                                     if fk["child_col"] == fk_col_name:
                                         ptable = fk["parent_table"]
-                                        if any(h in ptable.lower() for h in fspec.lookup_hint):
+                                        if fspec.lookup_hint and any(h in ptable.lower() for h in fspec.lookup_hint):
                                             # Look for display value
                                             pcols = schema_graph["tables"][ptable]["columns"]
                                             pval_col = None
@@ -504,11 +524,11 @@ class SchemaDetector:
             col_year_lookup_pk = ""
             col_year_lookup_value = ""
             if isinstance(year_col, dict):
-                col_year_type = "FK_LOOKUP"
-                col_year_lookup_table = year_col["lookup_table"]
-                col_year_lookup_pk = year_col["lookup_pk"]
-                col_year_lookup_value = year_col["lookup_value_col"]
-                year_col = year_col["raw_column"]
+                col_year_type = year_col.get("type", "FK_LOOKUP")
+                col_year_lookup_table = year_col.get("lookup_table", "")
+                col_year_lookup_pk = year_col.get("lookup_pk", "")
+                col_year_lookup_value = year_col.get("lookup_value_col", "")
+                year_col = year_col.get("raw_column", str(year_col))
 
             # STUDENT_MASTER -> PARENT_CONTACTS
             p_tbl = p_cand["table"] if p_cand and "student_foreign_key" in p_cand["cols"] else ""
@@ -689,10 +709,24 @@ class SchemaDetector:
                     (y_tbl, _get("year_lookup_value", "col_year_lookup_value"), "year_name_display"),
                 ])
 
+        # Parse mapping_extensions to skip extended fields
+        ext_json_str = _get("mapping_extensions_json", "mapping_extensions")
+        ext = {}
+        if isinstance(ext_json_str, dict):
+            ext = ext_json_str
+        elif isinstance(ext_json_str, str) and ext_json_str:
+            import json
+            try: ext = json.loads(ext_json_str)
+            except: pass
+
         try:
             cursor = connection.cursor(dictionary=True)
             for tbl_val, col_val, purpose in CHECKS:
                 if not tbl_val or not col_val:
+                    continue
+                
+                # If this field is handled by an extension, it doesn't live in the base table
+                if purpose in ext:
                     continue
                 
                 cursor.execute("""

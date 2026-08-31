@@ -2,7 +2,7 @@ import customtkinter as ctk
 import threading
 from ui.styles import COLORS, FONTS
 from logic.db_handler import DBHandler
-from logic.risk_engine import AdvancedRiskPredictor
+from logic.prediction_service import PredictionService
 
 PREMIUM_BG = "#090A0F"
 PREMIUM_CARD = "#12141E"

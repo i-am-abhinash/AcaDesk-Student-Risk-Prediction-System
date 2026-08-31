@@ -500,7 +500,7 @@ class InsightCenter(ctk.CTkFrame):
         
         if target:
             self.current_student_data = target
-            from logic.risk_engine import FIELD_SYNONYMS
+            from logic.prediction_service import FIELD_SYNONYMS
             self.ignore_updates = True
             
             for logical, synonyms in FIELD_SYNONYMS.items():

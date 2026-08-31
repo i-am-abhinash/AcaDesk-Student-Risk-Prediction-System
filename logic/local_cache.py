@@ -1,6 +1,7 @@
 import sqlite3
 import os
 from datetime import datetime
+from contextlib import contextmanager
 from logic.config_manager import PROJECT_ROOT
 
 CACHE_DB_PATH = os.path.join(PROJECT_ROOT, "acadesk_cache.db")
@@ -10,10 +11,17 @@ class LocalCache:
         self.db_path = db_path
         self._init_db()
 
+    @contextmanager
     def get_connection(self):
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            yield conn
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def _init_db(self):
         with self.get_connection() as conn:

@@ -36,17 +36,18 @@ VIEW_ACADEMIC = "vw_acadesk_academic"
 VIEW_BRANCH = "vw_acadesk_branch"
 
 
-def _safe_float(val, default: float = 0.0) -> float:
+def _safe_float(val, default=None):
+    if val is None: return default
     try:
-        return float(val) if val is not None else default
-    except (TypeError, ValueError):
+        return float(val)
+    except (ValueError, TypeError):
         return default
 
-
-def _safe_int(val, default: int = 0) -> int:
+def _safe_int(val, default=None):
+    if val is None: return default
     try:
-        return int(val) if val is not None else default
-    except (TypeError, ValueError):
+        return int(val)
+    except (ValueError, TypeError):
         return default
 
 
@@ -105,6 +106,8 @@ class DataRetrieval:
 
         if self._strategy == "VIEW":
             self._impl = _ViewStrategy(erp_connection, mapping)
+        elif self._strategy == "INTELLIGENT_ADAPTER":
+            self._impl = _IntelligentAdapterStrategy(erp_connection, mapping)
         else:
             self._impl = _AdapterStrategy(erp_connection, mapping)
 
@@ -277,6 +280,27 @@ class _AdapterStrategy:
                 
         return students, histories, dept_list
 
+    def _build_extension_subquery(self, ext_key: str, ext_info: dict, s_tbl: str, s_id: str) -> str:
+        """
+        Builds a correlated subquery for a mapping extension.
+        """
+        t = ext_info.get("type", "")
+        rtbl = ext_info.get("resolved_table", "")
+        rcol = ext_info.get("resolved_column", "")
+        if not rtbl or not rcol:
+            return "NULL"
+            
+        fk_col = self._col("col_student_join", "col_academic_join") or "student_id"
+        
+        if t == "DERIVED_AGGREGATE":
+            agg = ext_info.get("recipe", {}).get("aggregation_function", "MAX")
+            return f"(SELECT {agg}({rcol}) FROM {rtbl} _ext WHERE _ext.{fk_col} = s.{s_id})"
+            
+        elif t == "STUDENT_LINKED_TABLE":
+            return f"(SELECT {rcol} FROM {rtbl} _ext WHERE _ext.{fk_col} = s.{s_id} LIMIT 1)"
+            
+        return "NULL"
+
     def fetch_batches(self, batch_size=500) -> Generator[Tuple[List[NormalizedStudent], List[SemesterRecord], List[dict]], None, None]:
         depts = self.fetch_branch_map()
         dept_list = [{"dept_id": k, "dept_name": v} for k, v in depts.items()]
@@ -356,6 +380,9 @@ class _AdapterStrategy:
 
         s_email = self._col("col_email", "col_email")
         if s_email: select_parts.append(f"s.{s_email} AS email")
+        
+        s_adm_type = self._col("col_admission_type", "col_admission_type")
+        if s_adm_type: select_parts.append(f"s.{s_adm_type} AS admission_type")
 
         # Academic Fields
         optional_a_cols = {
@@ -380,7 +407,7 @@ class _AdapterStrategy:
             if alias == "backlogs": ext_key = "backlog_count"
             if ext_key in ext:
                 sq = self._build_extension_subquery(ext_key, ext[ext_key], s_tbl, s_id)
-                select_parts.append(f"COALESCE({sq}, 0) AS {alias}")
+                select_parts.append(f"({sq}) AS {alias}")
             elif col: 
                 select_parts.append(f"ar.{col} AS {alias}")
 
@@ -421,12 +448,56 @@ class _AdapterStrategy:
             if not rows:
                 break
 
-            students_batch = []
+            # First pass: collect basic info to fetch histories
+            raw_students = []
+            sids = []
             for row in rows:
                 sid = str(row.get("sid", ""))
+                raw_students.append((sid, row))
+                if sid:
+                    sids.append(sid)
+
+            _log.info(f"ADAPTER: fetched batch of {len(raw_students)} students (offset {offset}).")
+            
+            # Fetch histories first to determine total semesters completed
+            h_tbl = self._tbl("tbl_history") or self._tbl("tbl_academic")
+            histories_batch = []
+            student_history_count = {}
+            if h_tbl:
+                h_join = self._col("col_student_join", "col_academic_join") or "student_id"
+                h_sem = self._col("col_semester") or "semester"
+                
+                if sids:
+                    placeholders = ", ".join(["%s"] * len(sids))
+                    h_sql = f"SELECT * FROM {h_tbl} WHERE {h_join} IN ({placeholders}) ORDER BY {h_join}, {h_sem} ASC"
+                    try:
+                        h_cursor = self._conn.cursor(dictionary=True)
+                        h_cursor.execute(h_sql, sids)
+                        h_rows = h_cursor.fetchall()
+                        h_cursor.close()
+                        
+                        for h_row in h_rows:
+                            hsid = str(h_row.get(h_join, ""))
+                            student_history_count[hsid] = student_history_count.get(hsid, 0) + 1
+                            histories_batch.append(SemesterRecord(
+                                student_id=hsid,
+                                semester_number=_safe_int(h_row.get(h_sem, 0)),
+                                cgpa_that_semester=_safe_float(h_row.get("cgpa", h_row.get("sgpa", 0.0))),
+                                attendance_that_semester=_safe_float(h_row.get("attendance_percentage", h_row.get("attendance", h_row.get("attendance_pct", 0.0)))),
+                                backlogs_that_semester=_safe_int(h_row.get("backlog_count", h_row.get("backlogs", 0))),
+                            ))
+                    except Exception as e:
+                        _log.debug(f"ADAPTER history fetch failed: {e}")
+
+            # Now build the normalized students
+            students_batch = []
+            for sid, row in raw_students:
                 branch_id = str(row.get("sbranch", ""))
                 year = _parse_year(row.get("syear"))
-
+                adm_type = str(row.get("admission_type", "")) if row.get("admission_type") else None
+                is_lateral = "lateral" in adm_type.lower() if adm_type else False
+                completed = student_history_count.get(sid, 0)
+                
                 student = NormalizedStudent(
                     student_id=sid,
                     full_name=str(row.get("sname", "")),
@@ -440,8 +511,10 @@ class _AdapterStrategy:
                         else (depts.get(branch_id) or "Unknown Department")
                     )(),
                     current_year=year,
-                    current_semester=year * 2 - 1,
-                    total_semesters_completed=max(0, (year - 1) * 2),
+                    current_semester=completed + 1,
+                    total_semesters_completed=completed,
+                    admission_type=adm_type,
+                    is_lateral=is_lateral,
                     attendance_pct=_safe_float(row.get("att")),
                     internal_marks=_safe_float(row.get("marks")),
                     mid_exam_score=_safe_float(row.get("mid")),
@@ -460,35 +533,187 @@ class _AdapterStrategy:
                 )
                 students_batch.append(student)
 
-            _log.info(f"ADAPTER: fetched batch of {len(students_batch)} students (offset {offset}).")
-            
-            # For histories, we can fetch history for just this batch to save memory
-            h_tbl = self._tbl("tbl_history") or self._tbl("tbl_academic")
-            histories_batch = []
-            if h_tbl:
-                h_join = self._col("col_student_join", "col_academic_join") or "student_id"
-                h_sem = self._col("col_semester") or "semester"
-                
-                sids = [s.student_id for s in students_batch]
-                if sids:
-                    placeholders = ", ".join(["%s"] * len(sids))
-                    h_sql = f"SELECT * FROM {h_tbl} WHERE {h_join} IN ({placeholders}) ORDER BY {h_join}, {h_sem} ASC"
-                    try:
-                        h_cursor = self._conn.cursor(dictionary=True)
-                        h_cursor.execute(h_sql, sids)
-                        h_rows = h_cursor.fetchall()
-                        h_cursor.close()
-                        
-                        for h_row in h_rows:
-                            histories_batch.append(SemesterRecord(
-                                student_id=str(h_row.get(h_join, "")),
-                                semester_number=_safe_int(h_row.get(h_sem, 0)),
-                                cgpa_that_semester=_safe_float(h_row.get("cgpa", h_row.get("sgpa", 0.0))),
-                                attendance_that_semester=_safe_float(h_row.get("attendance_percentage", h_row.get("attendance", h_row.get("attendance_pct", 0.0)))),
-                                backlogs_that_semester=_safe_int(h_row.get("backlog_count", h_row.get("backlogs", 0))),
-                            ))
-                    except Exception as e:
-                        _log.debug(f"ADAPTER history fetch failed: {e}")
-
             yield students_batch, histories_batch, dept_list if offset == 0 else []
+            offset += batch_size
+
+# ---------------------------------------------------------------------------
+def parse_year_to_int(val) -> int:
+    if not val: return 1
+    v = str(val).lower().strip()
+    if '1' in v or 'first' in v or v == 'i': return 1
+    if '2' in v or 'second' in v or v == 'ii': return 2
+    if '3' in v or 'third' in v or v == 'iii': return 3
+    if '4' in v or 'fourth' in v or v == 'iv': return 4
+    try:
+        return int(float(v))
+    except:
+        return 1
+
+class _IntelligentAdapterStrategy:
+    def __init__(self, erp_connection, mapping: dict):
+        self._conn = erp_connection
+        self._m = mapping
+
+    def fetch_all(self) -> Tuple[List[NormalizedStudent], List[SemesterRecord], List[dict]]:
+        students = []
+        histories = []
+        dept_list = []
+        for s_batch, h_batch, d_list in self.fetch_batches(batch_size=9999999):
+            students.extend(s_batch)
+            histories.extend(h_batch)
+            if d_list: dept_list = d_list
+        return students, histories, dept_list
+
+    def fetch_batches(self, batch_size=500):
+        m = self._m
+        s_tbl = m.get("tbl_student")
+        if not s_tbl:
+            _log.error("INTELLIGENT ADAPTER: tbl_student is missing.")
+            yield [], [], []
+            return
+
+        s_pk = m.get("col_student_pk")
+        s_name = m.get("col_student_name")
+        
+        selects = [f"s.{s_pk} AS student_id", f"s.{s_name} AS full_name"]
+        joins = []
+        
+        # Branch
+        b_type = m.get("col_branch_type")
+        if b_type == "FK_LOOKUP":
+            selects.append(f"s.{m.get('col_branch_fk')} AS branch_id_raw")
+            selects.append(f"br.{m.get('col_branch_name')} AS branch_name")
+            joins.append(f"LEFT JOIN {m.get('tbl_branch')} br ON s.{m.get('col_branch_fk')} = br.{m.get('col_branch_pk')}")
+        elif b_type == "DIRECT":
+            selects.append(f"s.{m.get('col_branch_name')} AS branch_id_raw")
+            selects.append(f"s.{m.get('col_branch_name')} AS branch_name")
+            
+        # Year
+        y_type = m.get("col_year_type")
+        if y_type == "FK_LOOKUP":
+            selects.append(f"yr.{m.get('col_year_lookup_val')} AS year_name_raw")
+            joins.append(f"LEFT JOIN {m.get('col_year_lookup_table')} yr ON s.{m.get('col_student_year')} = yr.{m.get('col_year_lookup_pk')}")
+        elif y_type == "DIRECT":
+            selects.append(f"s.{m.get('col_student_year')} AS year_name_raw")
+        elif y_type == "DERIVED_AGGREGATE" or y_type == "DERIVED":
+            # For simplicity, assuming semester-based year derivation was mapped directly if possible,
+            # or we just rely on current_semester fallback.
+            pass
+            
+        # Simple Direct fields
+        direct_fields = {
+            "col_email": "email",
+            "col_internal_marks": "internal_marks",
+            "col_cgpa": "cgpa",
+            "col_semester": "semester",
+            "col_backlogs": "backlog_count",
+            "col_mid_exam": "mid_exam_score",
+            "col_lab_perf": "lab_performance",
+            "col_assignments": "assignment_marks",
+            "col_tenth": "tenth_percentage",
+            "col_inter": "inter_percentage",
+            "col_diploma": "diploma_percentage",
+            "col_cons_abs": "consecutive_absences",
+            "col_leave_freq": "leave_frequency",
+            "col_parent_email": "parent_email",
+            "col_parent_phone": "parent_phone"
+        }
+        
+        # Only add to selects if DIRECT method was stored. But we flattened the mappings.
+        # We can just check if they are populated and we join appropriately.
+        # Note: the new mapping sets col_X_type = "DIRECT" or similar, OR we just use the flattened col_name 
+        # and assume it belongs to the target table.
+        # The prompt specifies: [academic columns if DIRECT]
+        
+        import json
+        ac_join_path = None
+        if m.get("join_path_academic"):
+            try:
+                ac_join_path = json.loads(m["join_path_academic"])
+            except: pass
+            
+        if ac_join_path and ac_join_path.get("direct_fk"):
+            a_tbl = m.get("tbl_academic")
+            a_join_col = m.get("col_academic_join")
+            joins.append(f"LEFT JOIN (SELECT * FROM {a_tbl} WHERE id IN (SELECT MAX(id) FROM {a_tbl} GROUP BY {a_join_col})) ar ON ar.{a_join_col} = s.{s_pk}")
+            
+            # Map academic direct cols to ar.X
+            # Let's assume all academic cols are on `ar` if they are defined
+            for k, v in direct_fields.items():
+                col_name = m.get(k)
+                if col_name and k not in ["col_email", "col_parent_email", "col_parent_phone"]:
+                    selects.append(f"ar.{col_name} AS {v}")
+                    
+        # Parent / Linked (Simplification: just direct on student for now unless STUDENT_LINKED is implemented via joins)
+        for k in ["col_email", "col_parent_email", "col_parent_phone"]:
+            col_name = m.get(k)
+            if col_name:
+                selects.append(f"s.{col_name} AS {direct_fields[k]}")
+                
+        # Attendance Derived
+        if m.get("col_att_type") == "DERIVED_AGGREGATE":
+            att_join = m.get("col_attendance_join")
+            att_status = m.get("col_attendance_status")
+            vals_str = m.get("col_attendance_present_vals")
+            att_tbl = m.get("tbl_attendance")
+            if vals_str:
+                joins.append(f"LEFT JOIN (SELECT {att_join} AS sid, SUM(CASE WHEN {att_status} IN ({vals_str}) THEN 1 ELSE 0 END) * 100.0 / COUNT(*) AS att_pct_computed FROM {att_tbl} GROUP BY {att_join}) att_agg ON att_agg.sid = s.{s_pk}")
+                selects.append("att_agg.att_pct_computed AS attendance_pct")
+        elif m.get("col_att_pct"):
+             # Direct
+             selects.append(f"ar.{m.get('col_att_pct')} AS attendance_pct")
+             
+        # Build SQL
+        base_sql = f"SELECT {', '.join(selects)} FROM {s_tbl} s " + " ".join(joins)
+        
+        offset = 0
+        while True:
+            sql = f"{base_sql} LIMIT {batch_size} OFFSET {offset}"
+            try:
+                cursor = self._conn.cursor(dictionary=True)
+                cursor.execute(sql)
+                rows = cursor.fetchall()
+                cursor.close()
+            except Exception as e:
+                _log.error(f"INTELLIGENT ADAPTER Error: {e}")
+                break
+                
+            if not rows: break
+            
+            students_batch = []
+            dept_list_map = {}
+            for row in rows:
+                sid = str(row.get("student_id", ""))
+                bid = str(row.get("branch_id_raw", ""))
+                bname = str(row.get("branch_name", bid))
+                dept_list_map[bid] = bname
+                
+                students_batch.append(NormalizedStudent(
+                    student_id=sid,
+                    full_name=str(row.get("full_name", "")),
+                    display_name=str(row.get("full_name", "")),
+                    display_reg_no=sid,
+                    registration_no=sid,
+                    branch_id=bid,
+                    branch_name=bname,
+                    current_year=parse_year_to_int(row.get("year_name_raw")),
+                    attendance_pct=_safe_float(row.get("attendance_pct")),
+                    internal_marks=_safe_float(row.get("internal_marks")),
+                    mid_exam_score=_safe_float(row.get("mid_exam_score")),
+                    assignment_marks=_safe_float(row.get("assignment_marks")),
+                    lab_performance=_safe_float(row.get("lab_performance")),
+                    cgpa=_safe_float(row.get("cgpa")),
+                    backlog_count=_safe_int(row.get("backlog_count")),
+                    consecutive_absences=_safe_int(row.get("consecutive_absences")),
+                    leave_frequency=_safe_int(row.get("leave_frequency")),
+                    tenth_percentage=_safe_float(row.get("tenth_percentage")) or None,
+                    inter_percentage=_safe_float(row.get("inter_percentage")) or None,
+                    diploma_percentage=_safe_float(row.get("diploma_percentage")) or None,
+                    email=row.get("email"),
+                    parent_email=row.get("parent_email"),
+                    parent_phone=row.get("parent_phone"),
+                ))
+            
+            dlist = [{"dept_id": k, "dept_name": v} for k, v in dept_list_map.items()]
+            yield students_batch, [], dlist if offset == 0 else []
             offset += batch_size

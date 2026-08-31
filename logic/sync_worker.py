@@ -116,6 +116,14 @@ class SyncWorker:
 
     def _run(self) -> None:
         try:
+            # ── STEP 0: Check manual confirmation ──────────
+            if not self.erp_config.get("mapping_confirmed_by_human"):
+                self._finish(SyncResult(
+                    SyncResult.SCHEMA_ERROR,
+                    "ERP configuration is incomplete. Please confirm the mapping in the setup wizard."
+                ))
+                return
+
             # ── STEP 1: Validate ERP connection & stored mapping ──────────
             self._emit(0.05, "Connecting to ERP database...")
 
@@ -253,7 +261,40 @@ class SyncWorker:
             except Exception as e:
                 _log.debug(f"Legacy local_cache departments insert (non-critical): {e}")
 
+            # ── STEP 4.2: Behavioral Metrics ──────────────────────────────
+            self._emit(0.80, "Computing behavioral metrics...")
+            session.compute_consecutive_absences()
+
             self._emit(0.85, "Session cache populated.")
+            
+            # ── STEP 4.5: College Model Training ──────────────────────────
+            try:
+                from logic.college_trainer import CollegeModelTrainer
+                college_name = self.shared_data.get("college_name", "Unknown College")
+                # Validated mapping keys represent available features
+                available_feats = list(validated_mapping.keys())
+                trainer = CollegeModelTrainer(college_name, available_feats)
+                should_train, reason = trainer.should_retrain()
+                
+                if should_train:
+                    self._emit(0.86, f"Starting AI training: {reason}...")
+                    
+                    # Fetch all student records for training
+                    with session.get_connection() as conn:
+                        cursor = conn.execute("SELECT * FROM students")
+                        training_records = [dict(row) for row in cursor.fetchall()]
+                        
+                    def run_trainer():
+                        try:
+                            _log.info(f"Background training started for {college_name}")
+                            trainer.train(training_records)
+                            _log.info("Background training completed successfully.")
+                        except Exception as train_e:
+                            _log.error(f"Background training failed: {train_e}")
+                            
+                    threading.Thread(target=run_trainer, daemon=True, name="AcaDesk-Trainer").start()
+            except Exception as train_setup_e:
+                _log.warning(f"[SyncWorker] Failed to setup Step 4.5 College Model Training: {train_setup_e}")
 
             # ── STEP 5: AI precomputation (NO DB connections during this step) ─
             self._emit(0.87, "Running AI risk analysis...")
@@ -350,7 +391,7 @@ class SyncWorker:
         BEFORE any AI call. No database connection is open during inference.
         The session cache is written AFTER all predictions are complete.
         """
-        from logic.risk_engine import AdvancedRiskPredictor
+        from logic.prediction_service import PredictionService
         from logic.data_contract import PENDING_PREDICTION
 
         session = get_session_cache()
@@ -395,7 +436,7 @@ class SyncWorker:
         #  do NOT have access to this connection.)
 
         # ── Phase C: Run AI inference — pure memory-in, memory-out ────────
-        ai = AdvancedRiskPredictor()
+        ai = PredictionService()
         ai_data = []
         total = len(student_data_list)
 

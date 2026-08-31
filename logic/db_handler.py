@@ -260,6 +260,9 @@ class DBHandler:
             "syear": str(year_val),
             "current_year": int(year_val) if str(year_val).isdigit() else 1,
             "current_semester": r.get("current_semester", 1),
+            "total_semesters_completed": r.get("total_semesters_completed", 0),
+            "is_lateral": bool(r.get("is_lateral", False)),
+            "admission_type": r.get("admission_type", ""),
             # Academic indicators — use canonical names AND legacy aliases
             "avg_attendance": float(r.get("attendance_pct") or r.get("avg_attendance") or 0.0),
             "attendance_pct": float(r.get("attendance_pct") or r.get("avg_attendance") or 0.0),

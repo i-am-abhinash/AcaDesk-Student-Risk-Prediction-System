@@ -229,9 +229,36 @@ class CentralAuth:
             conn.commit()
             # Add new columns to existing installations safely
             new_cols = [
-                ("strategy",            "VARCHAR(20) DEFAULT 'ADAPTER'"),
-                ("col_assign_marks",     "VARCHAR(100)"),
-                ("discovery_timestamp", "DATETIME"),
+                ("tbl_attendance", "VARCHAR(100)"),
+                ("tbl_parent", "VARCHAR(100)"),
+                ("tbl_admission", "VARCHAR(100)"),
+                ("col_student_pk", "VARCHAR(100)"),
+                ("col_student_name", "VARCHAR(100)"),
+                ("col_student_year", "VARCHAR(100)"),
+                ("col_year_type", "VARCHAR(20)"),
+                ("col_year_lookup_table", "VARCHAR(100)"),
+                ("col_year_lookup_pk", "VARCHAR(100)"),
+                ("col_year_lookup_val", "VARCHAR(100)"),
+                ("col_branch_fk", "VARCHAR(100)"),
+                ("col_branch_pk", "VARCHAR(100)"),
+                ("col_branch_type", "VARCHAR(20)"),
+                ("col_academic_join", "VARCHAR(100)"),
+                ("col_attendance_join", "VARCHAR(100)"),
+                ("col_attendance_status", "VARCHAR(100)"),
+                ("col_attendance_present_vals", "TEXT"),
+                ("col_att_pct", "VARCHAR(100)"),
+                ("col_att_type", "VARCHAR(20)"),
+                ("col_internal_marks", "VARCHAR(100)"),
+                ("col_cgpa", "VARCHAR(100)"),
+                ("col_cgpa_type", "VARCHAR(20)"),
+                ("col_semester", "VARCHAR(100)"),
+                ("col_backlogs", "VARCHAR(100)"),
+                ("col_backlogs_type", "VARCHAR(20)"),
+                ("join_path_academic", "TEXT"),
+                ("join_path_attendance", "TEXT"),
+                ("strategy", "VARCHAR(20) DEFAULT 'ADAPTER'"),
+                ("discovery_timestamp", "VARCHAR(50)"),
+                ("mapping_confirmed_by_human", "TINYINT(1) DEFAULT 0"),
             ]
             for col_name, col_def in new_cols:
                 try:
@@ -471,7 +498,7 @@ class CentralAuth:
                     "database": erp['db_name']
                 }
                 # Load mapping — include tbl_/col_ prefixed keys AND 'strategy'
-                _EXTRA_KEYS = {'strategy', 'discovery_timestamp'}
+                _EXTRA_KEYS = {'strategy', 'discovery_timestamp', 'mapping_confirmed_by_human'}
                 for k, v in erp.items():
                     if (k.startswith('tbl_') or k.startswith('col_') or k in _EXTRA_KEYS):
                         if v is not None:
@@ -573,11 +600,11 @@ class CentralAuth:
                         import logging
                         logging.getLogger(__name__).error(f"save_erp_config: failed saving mapping_extensions: {e}")
 
-                # Save strategy flag and all flat column/table mappings
+                # Save strategy flag, human confirmation flag, and all flat column/table mappings
                 for k, v in mapping.items():
-                    if k == 'strategy' or k.startswith('tbl_') or k.startswith('col_'):
+                    if k in ('strategy', 'mapping_confirmed_by_human', 'discovery_timestamp') or k.startswith('tbl_') or k.startswith('col_') or k.startswith('join_path_'):
                         # Skip dictionaries as flat strings cannot hold them
-                        if isinstance(v, dict): continue
+                        if isinstance(v, dict) or isinstance(v, list): continue
                         try:
                             up_sql = f"UPDATE erp_configs SET {k}=%s WHERE college_name=%s"
                             cursor.execute(up_sql, (v, college))

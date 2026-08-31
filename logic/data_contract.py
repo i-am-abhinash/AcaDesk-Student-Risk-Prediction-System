@@ -29,18 +29,19 @@ class NormalizedStudent:
     current_semester: int = 1
     total_semesters_completed: int = 0
     admission_type: Optional[str] = None        # e.g. "Regular", "Management", "Lateral"
+    is_lateral: bool = False
     entrance_rank: Optional[int] = None
 
     # --- Current Academic Indicators ---
-    attendance_pct: float = 0.0
-    internal_marks: float = 0.0
-    mid_exam_score: float = 0.0
-    assignment_marks: float = 0.0
-    lab_performance: float = 0.0
-    cgpa: float = 0.0
-    backlog_count: int = 0
-    consecutive_absences: int = 0
-    leave_frequency: int = 0
+    attendance_pct: Optional[float] = None
+    internal_marks: Optional[float] = None
+    mid_exam_score: Optional[float] = None
+    assignment_marks: Optional[float] = None
+    lab_performance: Optional[float] = None
+    cgpa: Optional[float] = None
+    backlog_count: Optional[int] = None
+    consecutive_absences: Optional[int] = None
+    leave_frequency: Optional[int] = None
 
     # --- Prior Academic Background ---
     tenth_percentage: Optional[float] = None

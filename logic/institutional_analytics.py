@@ -33,7 +33,7 @@ class InstitutionalAnalytics:
                 branch_groups[bid] = []
             branch_groups[bid].append(s)
             
-        # Fast Batch Risk Computation (AdvancedRiskPredictor routes internally)
+        # Fast Batch Risk Computation (PredictionService routes internally)
         global_stats, branch_stats_raw = predictor.batch_analyze(all_students)
             
         # We need to iterate over all branches

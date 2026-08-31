@@ -55,8 +55,18 @@ def train_model():
     print("Evaluation:")
     print(classification_report(y_test, model.predict(X_test)))
     
-    joblib.dump(model, 'first_year_model.pkl')
-    print("Saved first_year_model.pkl successfully!")
+    import json
+    import os
+    model.feature_names_in_ = X.columns.to_numpy()
+    model_path = os.path.join(os.path.dirname(__file__), '..', 'first_year_model.pkl')
+    joblib.dump(model, model_path)
+    
+    features_path = model_path.replace('.pkl', '.features.json')
+    with open(features_path, 'w') as f:
+        json.dump(list(X.columns), f)
+        
+    print(f"Saved {model_path} successfully!")
+    print(f"Saved required features to {features_path} successfully!")
 
 if __name__ == "__main__":
     train_model()

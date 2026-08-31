@@ -6,7 +6,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from logic.central_auth import CentralAuth
 from logic.db_handler import DBHandler
-from logic.risk_engine import AdvancedRiskPredictor
+from logic.prediction_service import PredictionService
 from logic.email_service import EmailService
 from logic.encryption import decrypt_text
 
@@ -29,7 +29,7 @@ def run_scanner():
     finally:
         conn.close()
         
-    predictor = AdvancedRiskPredictor()
+    predictor = PredictionService()
     email_service = EmailService()
     
     for erp in configs:
